@@ -1,0 +1,94 @@
+name: 'JIT Compile Test'
+description: 'Tests JIT compilation of OSSIA addons'
+inputs:
+  score-version:
+    description: 'Score version to test with'
+    required: true
+  addon-path:
+    description: 'Path to addon source'
+    required: false
+    default: '.'
+  sdk-path:
+    description: 'Path to JIT SDK (optional)'
+    required: false
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Determine score filename
+      id: score-filename
+      shell: bash
+      run: |
+        if [[ "${{ inputs.score-version }}" == "master" ]] || [[ "${{ inputs.score-version }}" == "continuous" ]]; then
+          PREFIX="ossia.score-master"
+        else
+          PREFIX="ossia.score-${{ inputs.score-version }}"
+        fi
+        
+        if [[ "${{ runner.os }}" == "Windows" ]]; then
+          echo "filename=${PREFIX}-win64.exe" >> $GITHUB_OUTPUT
+          echo "executable=./score.exe" >> $GITHUB_OUTPUT
+        elif [[ "${{ runner.os }}" == "macOS" ]]; then
+          echo "filename=${PREFIX}-macOS-AppleSilicon.dmg" >> $GITHUB_OUTPUT
+          echo "executable=/Volumes/score/ossia score.app/Contents/MacOS/ossia score" >> $GITHUB_OUTPUT
+        else
+          echo "filename=${PREFIX}-linux-x86_64.AppImage" >> $GITHUB_OUTPUT
+          echo "executable=./${{ steps.score-filename.outputs.filename }}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Download score
+      shell: bash
+      run: |
+        if [[ "${{ inputs.score-version }}" == "master" ]] || [[ "${{ inputs.score-version }}" == "continuous" ]]; then
+          DOWNLOAD_URL="https://github.com/ossia/score/releases/download/continuous/${{ steps.score-filename.outputs.filename }}"
+        else
+          DOWNLOAD_URL="https://github.com/ossia/score/releases/download/v${{ inputs.score-version }}/${{ steps.score-filename.outputs.filename }}"
+        fi
+        curl -L -O "$DOWNLOAD_URL"
+
+    - name: Install score (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        /usr/bin/hdiutil convert -quiet ${{ steps.score-filename.outputs.filename }} -format UDTO -o score
+        /usr/bin/hdiutil attach -quiet -nobrowse -noverify -noautoopen -mountpoint /Volumes/score score.cdr
+
+    - name: Install score (Windows)
+      if: runner.os == 'Windows'
+      shell: bash
+      run: |
+        7z x ${{ steps.score-filename.outputs.filename }}
+
+    - name: Install dependencies (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt -y install xvfb libasound2t64 libxcb1 libegl1 libgl1-mesa-dev libegl1-mesa-dev libglvnd0 libx11-6 libxcb-glx0 libgl1 libdbus-1-3 libxcb-xkb1 libxkbcommon-x11-0 libxcb-xkb1 libfuse2
+        chmod +x ${{ steps.score-filename.outputs.filename }}
+
+    - name: Set SDK path
+      if: inputs.sdk-path != ''
+      shell: bash
+      run: |
+        echo "SCORE_JIT_SDK=${{ inputs.sdk-path }}" >> $GITHUB_ENV
+
+    - name: Set Windows environment
+      if: runner.os == 'Windows'
+      shell: bash
+      run: |
+        echo "QT_FORCE_STDERR_LOGGING=1" >> $GITHUB_ENV
+        echo "QT_ASSUME_STDERR_HAS_CONSOLE=1" >> $GITHUB_ENV
+
+    - name: Compile addons (Windows/macOS)
+      if: runner.os != 'Linux'
+      shell: bash
+      run: |
+        cd ${{ inputs.addon-path }}
+        find . -name '*.hpp' -exec "${{ steps.score-filename.outputs.executable }}" --no-gui --compile-addon {} \;
+
+    - name: Compile addons (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        cd ${{ inputs.addon-path }}
+        find . -name '*.hpp' -exec xvfb-run --auto-servernum "${{ steps.score-filename.outputs.executable }}" --no-gui --compile-addon {} \;

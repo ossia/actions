@@ -1,0 +1,74 @@
+name: 'Package OSSIA Addon'
+description: 'Packages OSSIA addon artifacts for distribution'
+inputs:
+  addon-path:
+    description: 'Path to addon source (for metadata)'
+    required: false
+    default: '.'
+  output-path:
+    description: 'Path where to create the package'
+    required: false
+    default: 'deploy'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+
+    - name: Create package directory
+      shell: bash
+      run: |
+        mkdir -p ${{ inputs.output-path }}
+
+    - name: Collect binaries
+      shell: bash
+      run: |
+        find . -name '*.so' -exec cp {} ${{ inputs.output-path }}/ \;
+        find . -name '*.dylib' -exec cp {} ${{ inputs.output-path }}/ \;
+        find . -name '*.dll' -exec cp {} ${{ inputs.output-path }}/ \;
+
+    - name: Create addon manifest
+      shell: bash
+      working-directory: ${{ inputs.output-path }}
+      run: |
+        # Find the plugin binaries
+        WIN32_PLUGIN=$(find . -name '*.dll' -exec basename {} \; | head -1)
+        LINUX_PLUGIN=$(find . -name '*.so' -exec basename {} \; | head -1)
+        MACOS_PLUGIN=$(find . -name '*.dylib' -exec basename {} \; | head -1)
+        
+        # Update addon.json with platform-specific binaries
+        if [[ -f "${{ inputs.addon-path }}/addon.json" ]]; then
+          cat "${{ inputs.addon-path }}/addon.json" | jq \
+            --arg win64 "$WIN32_PLUGIN" \
+            --arg linux64 "$LINUX_PLUGIN" \
+            --arg darwin64 "$MACOS_PLUGIN" \
+            '. + { "windows-x86_64": $win64, "linux-x86_64": $linux64, "darwin-aarch64": $darwin64 }' \
+            > localaddon.json
+        fi
+
+    - name: Copy metadata files
+      shell: bash
+      run: |
+        if [[ -f "${{ inputs.addon-path }}/LICENSE" ]]; then
+          cp -f "${{ inputs.addon-path }}/LICENSE" "${{ inputs.output-path }}/"
+        fi
+        if [[ -f "${{ inputs.addon-path }}/LICENSE.txt" ]]; then
+          cp -f "${{ inputs.addon-path }}/LICENSE.txt" "${{ inputs.output-path }}/"
+        fi
+        if [[ -f "${{ inputs.addon-path }}/README.md" ]]; then
+          cp -f "${{ inputs.addon-path }}/README.md" "${{ inputs.output-path }}/"
+        fi
+        if [[ -f "${{ inputs.addon-path }}/README" ]]; then
+          cp -f "${{ inputs.addon-path }}/README" "${{ inputs.output-path }}/"
+        fi
+
+    - name: Display package contents
+      shell: bash
+      run: |
+        echo "Package contents:"
+        ls -la ${{ inputs.output-path }}/
+        if [[ -f "${{ inputs.output-path }}/localaddon.json" ]]; then
+          echo "Addon manifest:"
+          cat "${{ inputs.output-path }}/localaddon.json"
+        fi

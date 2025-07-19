@@ -1,0 +1,41 @@
+name: 'Download OSSIA SDK'
+description: 'Downloads and sets up the OSSIA SDK for building score addons'
+inputs:
+  score-path:
+    description: 'Path to the score repository (for fetch-sdk.sh)'
+    required: false
+    default: ''
+outputs:
+  sdk-path:
+    description: 'Path to the installed SDK'
+    value: ${{ steps.detect-sdk.outputs.sdk-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Download SDK (from score repo)
+      if: inputs.score-path != ''
+      shell: bash
+      run: |
+        cd ${{ inputs.score-path }}
+        tools/fetch-sdk.sh
+
+    - name: Download SDK (standalone)
+      if: inputs.score-path == ''
+      shell: bash
+      run: |
+        curl -L -O "https://github.com/ossia/score/raw/master/tools/fetch-sdk.sh"
+        chmod +x fetch-sdk.sh
+        ./fetch-sdk.sh
+
+    - name: Detect SDK path
+      id: detect-sdk
+      shell: bash
+      run: |
+        if [[ "${{ runner.os }}" == "Windows" ]]; then
+          echo "sdk-path=/c/ossia-sdk" >> $GITHUB_OUTPUT
+        elif [[ "${{ runner.os }}" == "macOS" ]]; then
+          echo "sdk-path=/opt/ossia-sdk-aarch64" >> $GITHUB_OUTPUT
+        else
+          echo "sdk-path=/opt/ossia-sdk" >> $GITHUB_OUTPUT
+        fi

@@ -1,0 +1,48 @@
+name: 'Download Score SDK'
+description: 'Downloads the score SDK headers for building addons'
+inputs:
+  version:
+    description: 'Score version (use "continuous" for latest)'
+    required: false
+    default: 'continuous'
+  extract-path:
+    description: 'Path where to extract the SDK'
+    required: false
+    default: '.'
+outputs:
+  sdk-path:
+    description: 'Path to the extracted SDK'
+    value: ${{ steps.extract.outputs.sdk-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Determine SDK filename
+      id: sdk-filename
+      shell: bash
+      run: |
+        if [[ "${{ runner.os }}" == "Windows" ]]; then
+          echo "filename=sdk-windows-x86_64.zip" >> $GITHUB_OUTPUT
+        elif [[ "${{ runner.os }}" == "macOS" ]]; then
+          echo "filename=sdk-darwin-aarch64.zip" >> $GITHUB_OUTPUT
+        else
+          echo "filename=sdk-linux-x86_64.zip" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Download score SDK
+      uses: robinraju/release-downloader@v1.7
+      with: 
+        repository: "ossia/score"
+        tag: ${{ inputs.version }}
+        fileName: ${{ steps.sdk-filename.outputs.filename }}
+
+    - name: Extract score SDK
+      id: extract
+      shell: bash
+      run: |
+        mkdir -p ${{ inputs.extract-path }}
+        unzip ${{ steps.sdk-filename.outputs.filename }}
+
+        mv usr ${{ inputs.extract-path }}/
+
+        echo "sdk-path=${{ inputs.extract-path }}/usr" >> $GITHUB_OUTPUT
