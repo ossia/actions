@@ -44,7 +44,7 @@ runs:
           echo "executable=/Volumes/score/ossia score.app/Contents/MacOS/ossia score" >> $GITHUB_OUTPUT
         else
           echo "filename=${PREFIX}-linux-x86_64.AppImage" >> $GITHUB_OUTPUT
-          echo "executable=${PREFIX}-linux-x86_64.AppImage" >> $GITHUB_OUTPUT
+          echo "executable=./${PREFIX}-linux-x86_64.AppImage" >> $GITHUB_OUTPUT
         fi
 
     - name: Download score
