@@ -36,8 +36,10 @@ runs:
         if [[ "${{ inputs.version }}" == "latest" ]]; then
           VERSION=$(curl -s https://ossia.io/score-last-version.txt | tr -d '\n')
           echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
+        elif [[ "${{ inputs.version }}" == "continuous" ]]; then
+          echo "tag=continuous" >> $GITHUB_OUTPUT
         else
-          echo "tag=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          echo "tag=v${{ inputs.version }}" >> $GITHUB_OUTPUT
         fi
 
     - name: Download score SDK
@@ -52,7 +54,7 @@ runs:
       shell: bash
       run: |
         mkdir -p ${{ inputs.extract-path }}
-        unzip ${{ steps.sdk-filename.outputs.filename }}
+        unzip -qq ${{ steps.sdk-filename.outputs.filename }}
 
         mv usr ${{ inputs.extract-path }}/
 

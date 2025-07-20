@@ -69,6 +69,16 @@ runs:
       shell: bash
       run: |
         export PATH=$PATH:$PWD
+        echo " ! ! ! ! => " 
+        echo ${{ inputs.score-sdk-path }}/lib/cmake/score
+        echo "1:"
+        find . -name ScoreExternalAddon.cmake
+        echo "2:"
+        find . -name ScoreFunctions.cmake
+        echo "3:"
+        find ${{ inputs.score-sdk-path }} -name ScoreExternalAddon.cmake
+        echo "4:"
+        find ${{ inputs.score-sdk-path }} -name ScoreFunctions.cmake
         cmake -S ${{ inputs.addon-path }} -B ${{ env.BUILD_DIR }} \
           -DCMAKE_MODULE_PATH=${{ inputs.score-sdk-path }}/lib/cmake/score \
           -DSCORE_SDK=${{ inputs.score-sdk-path }} \
