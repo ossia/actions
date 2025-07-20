@@ -29,11 +29,22 @@ runs:
           echo "filename=sdk-linux-x86_64.zip" >> $GITHUB_OUTPUT
         fi
 
+    - name: Determine version
+      id: version
+      shell: bash
+      run: |
+        if [[ "${{ inputs.version }}" == "latest" ]]; then
+          VERSION=$(curl -s https://ossia.io/score-last-version.txt | tr -d '\n')
+          echo "tag=v${VERSION}" >> $GITHUB_OUTPUT
+        else
+          echo "tag=${{ inputs.version }}" >> $GITHUB_OUTPUT
+        fi
+
     - name: Download score SDK
       uses: robinraju/release-downloader@v1.7
       with: 
         repository: "ossia/score"
-        tag: ${{ inputs.version }}
+        tag: ${{ steps.version.outputs.tag }}
         fileName: ${{ steps.sdk-filename.outputs.filename }}
 
     - name: Extract score SDK

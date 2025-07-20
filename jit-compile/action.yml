@@ -15,14 +15,25 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Determine version
+      id: version
+      shell: bash
+      run: |
+        if [[ "${{ inputs.score-version }}" == "latest" ]]; then
+          VERSION=$(curl -s https://ossia.io/score-last-version.txt | tr -d '\n')
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+        else
+          echo "version=${{ inputs.score-version }}" >> $GITHUB_OUTPUT
+        fi
+
     - name: Determine score filename
       id: score-filename
       shell: bash
       run: |
-        if [[ "${{ inputs.score-version }}" == "master" ]] || [[ "${{ inputs.score-version }}" == "continuous" ]]; then
+        if [[ "${{ steps.version.outputs.version }}" == "master" ]] || [[ "${{ steps.version.outputs.version }}" == "continuous" ]]; then
           PREFIX="ossia.score-master"
         else
-          PREFIX="ossia.score-${{ inputs.score-version }}"
+          PREFIX="ossia.score-${{ steps.version.outputs.version }}"
         fi
         
         if [[ "${{ runner.os }}" == "Windows" ]]; then
@@ -39,10 +50,10 @@ runs:
     - name: Download score
       shell: bash
       run: |
-        if [[ "${{ inputs.score-version }}" == "master" ]] || [[ "${{ inputs.score-version }}" == "continuous" ]]; then
+        if [[ "${{ steps.version.outputs.version }}" == "master" ]] || [[ "${{ steps.version.outputs.version }}" == "continuous" ]]; then
           DOWNLOAD_URL="https://github.com/ossia/score/releases/download/continuous/${{ steps.score-filename.outputs.filename }}"
         else
-          DOWNLOAD_URL="https://github.com/ossia/score/releases/download/v${{ inputs.score-version }}/${{ steps.score-filename.outputs.filename }}"
+          DOWNLOAD_URL="https://github.com/ossia/score/releases/download/v${{ steps.version.outputs.version }}/${{ steps.score-filename.outputs.filename }}"
         fi
         curl -L -O "$DOWNLOAD_URL"
 
