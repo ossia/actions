@@ -31,6 +31,7 @@ jobs:
             }
     steps:
       - uses: maxim-lobanov/setup-xcode@v1
+        if: ${{ matrix.config.name == 'macOS' }}
         with:
           xcode-version: '>=16'
 
