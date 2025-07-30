@@ -33,9 +33,9 @@ runs:
       shell: bash
       run: |
         if [[ "${{ runner.os }}" == "Windows" ]]; then
-          echo "sdk-path=/c/ossia-sdk" >> $GITHUB_OUTPUT
+          echo "sdk-path=/c/ossia-sdk-x86_64" >> $GITHUB_OUTPUT
         elif [[ "${{ runner.os }}" == "macOS" ]]; then
           echo "sdk-path=/opt/ossia-sdk-aarch64" >> $GITHUB_OUTPUT
         else
-          echo "sdk-path=/opt/ossia-sdk" >> $GITHUB_OUTPUT
+          echo "sdk-path=/opt/ossia-sdk-x86_64" >> $GITHUB_OUTPUT
         fi

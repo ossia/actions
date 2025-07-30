@@ -33,11 +33,11 @@ runs:
       shell: bash
       run: |
         if [[ "${{ runner.os }}" == "Windows" ]]; then
-          echo "PATH=/c/ossia-sdk/llvm/bin:$PATH" >> $GITHUB_ENV
-          echo "CMAKE_COMPILER_FLAGS=-DCMAKE_C_COMPILER=c:/ossia-sdk/llvm/bin/clang.exe -DCMAKE_CXX_COMPILER=c:/ossia-sdk/llvm/bin/clang++.exe" >> $GITHUB_ENV
+          echo "PATH=${{ inputs.ossia-sdk-path }}/llvm/bin:$PATH" >> $GITHUB_ENV
+          echo "CMAKE_COMPILER_FLAGS=-DCMAKE_C_COMPILER=${{ inputs.ossia-sdk-path }}/llvm/bin/clang.exe -DCMAKE_CXX_COMPILER=${{ inputs.ossia-sdk-path }}/llvm/bin/clang++.exe" >> $GITHUB_ENV
         elif [[ "${{ runner.os }}" == "Linux" ]]; then
-          echo "PATH=/opt/ossia-sdk/llvm/bin:$PATH" >> $GITHUB_ENV
-          echo "CMAKE_COMPILER_FLAGS=-DCMAKE_C_COMPILER=/opt/ossia-sdk/llvm/bin/clang -DCMAKE_CXX_COMPILER=/opt/ossia-sdk/llvm/bin/clang++" >> $GITHUB_ENV
+          echo "PATH=${{ inputs.ossia-sdk-path }}/llvm/bin:$PATH" >> $GITHUB_ENV
+          echo "CMAKE_COMPILER_FLAGS=-DCMAKE_C_COMPILER=${{ inputs.ossia-sdk-path }}/llvm/bin/clang -DCMAKE_CXX_COMPILER=${{ inputs.ossia-sdk-path }}/llvm/bin/clang++" >> $GITHUB_ENV
         else
           echo "CMAKE_COMPILER_FLAGS=" >> $GITHUB_ENV
         fi
