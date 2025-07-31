@@ -80,7 +80,7 @@ runs:
         echo "4:"
         find ${{ inputs.score-sdk-path }} -name ScoreFunctions.cmake
         cmake --trace -S ${{ inputs.addon-path }} -B ${{ env.BUILD_DIR }} \
-          -DCMAKE_MODULE_PATH=${{ inputs.score-sdk-path }}/lib/cmake/score \
+          -DCMAKE_MODULE_PATH=$PWD/${{ inputs.score-sdk-path }}/lib/cmake/score \
           -DSCORE_SDK=${{ inputs.score-sdk-path }} \
           -DOSSIA_SDK=${{ inputs.ossia-sdk-path }} \
           -DCMAKE_BUILD_TYPE=${{ inputs.build-type }} \
