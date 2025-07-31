@@ -57,7 +57,7 @@ jobs:
         id: score-sdk
         with:
           version: "${{ matrix.version }}"
-          extract-path: "${{ runner.temp }}/sdk"
+          extract-path: "./sdk"
 
       - name: Build debug
         uses: ossia/actions/build-addon@master
