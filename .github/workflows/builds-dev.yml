@@ -25,7 +25,7 @@ jobs:
             }
           - {
               name: "macOS",
-              os: macos-latest,
+              os: macos-15,
               dependencies: "",
               additional_flags: ""
             }
