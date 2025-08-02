@@ -33,7 +33,7 @@ jobs:
       - uses: maxim-lobanov/setup-xcode@v1
         if: ${{ matrix.config.name == 'macOS' }}
         with:
-          xcode-version: '>=16'
+          xcode-version: '>=16.4'
 
       - name: Checkout addon
         uses: actions/checkout@v4
