@@ -88,6 +88,7 @@ runs:
       run: |
         echo "QT_FORCE_STDERR_LOGGING=1" >> $GITHUB_ENV
         echo "QT_ASSUME_STDERR_HAS_CONSOLE=1" >> $GITHUB_ENV
+        echo "SCORE_AUDIO_BACKEND=dummy" >> $GITHUB_ENV
 
     - name: Compile addons (Windows/macOS)
       if: runner.os != 'Linux'
@@ -99,4 +100,5 @@ runs:
       if: runner.os == 'Linux'
       shell: bash
       run: |
+        export QT_QPA_PLATFORM=xcb
         xvfb-run --auto-servernum "${{ steps.score-filename.outputs.executable }}" --no-gui --compile-addon ${{ inputs.addon-path }} \;
