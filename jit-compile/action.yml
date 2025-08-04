@@ -81,10 +81,9 @@ runs:
       if: inputs.sdk-path != ''
       shell: bash
       run: |
-        echo "SCORE_JIT_SDK=${{ inputs.sdk-path }}" >> $GITHUB_ENV
+        echo "SCORE_JIT_SDK=$(realpath ${{ inputs.sdk-path }})" >> $GITHUB_ENV
 
-    - name: Set Windows environment
-      if: runner.os == 'Windows'
+    - name: Set environment
       shell: bash
       run: |
         echo "QT_FORCE_STDERR_LOGGING=1" >> $GITHUB_ENV

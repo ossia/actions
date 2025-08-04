@@ -27,10 +27,10 @@ jobs:
         uses: ossia/actions/download-score-sdk@master
         with:
           version: "${{ matrix.version }}"
-          extract-path: "${{ runner.temp }}/sdk"
+          extract-path: "./sdk"
 
       - name: JIT compile test
         uses: ossia/actions/jit-compile@master
         with:
           score-version: ${{ matrix.version }}
-          sdk-path: "${{ runner.temp }}/sdk/usr"
+          sdk-path: "./sdk/usr"
