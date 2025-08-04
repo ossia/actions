@@ -93,12 +93,10 @@ runs:
       if: runner.os != 'Linux'
       shell: bash
       run: |
-        cd ${{ inputs.addon-path }}
-        find . -name '*.hpp' -exec "${{ steps.score-filename.outputs.executable }}" --no-gui --compile-addon {} \;
+        "${{ steps.score-filename.outputs.executable }}" --no-gui --compile-addon ${{ inputs.addon-path }} \;
 
     - name: Compile addons (Linux)
       if: runner.os == 'Linux'
       shell: bash
       run: |
-        cd ${{ inputs.addon-path }}
-        find . -name '*.hpp' -exec xvfb-run --auto-servernum "${{ steps.score-filename.outputs.executable }}" --no-gui --compile-addon {} \;
+        xvfb-run --auto-servernum "${{ steps.score-filename.outputs.executable }}" --no-gui --compile-addon ${{ inputs.addon-path }} \;
