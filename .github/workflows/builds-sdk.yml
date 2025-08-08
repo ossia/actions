@@ -21,7 +21,7 @@ jobs:
           - {
               name: "Ubuntu",
               os: ubuntu-latest,
-              dependencies: "sudo apt install -yqq libgl-dev libgl1-mesa-dev libegl1-mesa-dev libdrm-dev libxcomposite-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libxcb-*-dev libX11-*-dev libz-dev libtinfo6 libxext-dev",
+              dependencies: "sudo apt -y update; sudo apt install -yqq libgl-dev libgl1-mesa-dev libegl1-mesa-dev libdrm-dev libxcomposite-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libxcb-*-dev libX11-*-dev libz-dev libtinfo6 libxext-dev",
               additional_flags: ""
             }
           - {
@@ -31,6 +31,9 @@ jobs:
               additional_flags: ""
             }
     steps:
+      - name: Support longpaths
+        run: git config --global core.longpaths true
+
       - uses: maxim-lobanov/setup-xcode@v1
         if: ${{ matrix.config.name == 'macOS' }}
         with:

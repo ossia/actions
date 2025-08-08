@@ -15,9 +15,12 @@ jobs:
         config:
           - { name: "Windows", os: windows-latest }
           - { name: "Ubuntu", os: ubuntu-latest }
-          - { name: "macOS", os: macos-latest }
+          - { name: "macOS", os: macos-15 }
 
     steps:
+      - name: Support longpaths
+        run: git config --global core.longpaths true
+
       - name: Checkout addon
         uses: actions/checkout@v4
         with:
