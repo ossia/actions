@@ -207,15 +207,25 @@ runs:
         if [[ "$RUNNER_OS" == "macOS" ]]; then
           # Export code signing identity if certificate was imported
           if [[ -n "${{ inputs.macos-certificate-base64 }}" ]]; then
+            echo "Setting up code signing with identity: ossia.io"
             export MAC_CODESIGN_IDENTITY="ossia.io"
+          else
+            echo "No certificate provided, skipping code signing"
           fi
 
           # Export notarization credentials if available
           if [[ -n "${{ inputs.macos-notarize-team-id }}" ]]; then
+            echo "Setting up notarization credentials"
             export MAC_NOTARIZE_TEAM_ID="${{ inputs.macos-notarize-team-id }}"
             export MAC_NOTARIZE_APPLE_ID="${{ inputs.macos-notarize-apple-id }}"
             export MAC_NOTARIZE_PASSWORD="${{ inputs.macos-notarize-password }}"
+          else
+            echo "No notarization credentials provided"
           fi
+
+          # Debug: show what's set (without revealing secrets)
+          echo "MAC_CODESIGN_IDENTITY: ${MAC_CODESIGN_IDENTITY:-not set}"
+          echo "MAC_NOTARIZE_TEAM_ID: ${MAC_NOTARIZE_TEAM_ID:-not set}"
         fi
 
         # Build the command with absolute path to script
