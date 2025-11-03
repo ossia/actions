@@ -1,0 +1,187 @@
+name: 'Package Custom ossia score App'
+description: 'Creates custom branded ossia score applications with QML UI and score files'
+inputs:
+  app-name:
+    description: 'Name of the custom application'
+    required: true
+  qml-files:
+    description: 'Space-separated list of QML files or directories to include'
+    required: true
+  score-file:
+    description: 'Score file to autoplay (optional)'
+    required: false
+    default: ''
+  release-tag:
+    description: 'ossia score release tag to use (default: continuous)'
+    required: false
+    default: 'continuous'
+  output-path:
+    description: 'Output directory for generated packages'
+    required: false
+    default: 'packages'
+  platforms:
+    description: 'Space-separated list of platforms to build for (linux-x86_64 linux-aarch64 macos-intel macos-arm windows). If empty, builds for current platform.'
+    required: false
+    default: ''
+  score-repo:
+    description: 'Repository containing ossia score and tools/create-app.sh script'
+    required: false
+    default: 'https://github.com/ossia/score.git'
+  score-branch:
+    description: 'Branch of score repository to use'
+    required: false
+    default: 'master'
+
+outputs:
+  packages-path:
+    description: 'Path to the generated packages directory'
+    value: ${{ steps.set-output.outputs.packages-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout ossia score repository
+      uses: actions/checkout@v4
+      with:
+        repository: ossia/score
+        path: score-tools
+        ref: ${{ inputs.score-branch }}
+        sparse-checkout: |
+          tools/create-app.sh
+          tools/create-app-linux.sh
+          tools/create-app-macos.sh
+          tools/create-app-windows.sh
+        sparse-checkout-cone-mode: false
+
+    - name: Make scripts executable
+      shell: bash
+      run: |
+        chmod +x score-tools/tools/create-app*.sh
+
+    - name: Validate inputs
+      shell: bash
+      run: |
+        if [[ -z "${{ inputs.app-name }}" ]]; then
+          echo "Error: app-name is required"
+          exit 1
+        fi
+        if [[ -z "${{ inputs.qml-files }}" ]]; then
+          echo "Error: qml-files is required"
+          exit 1
+        fi
+
+        # Validate QML files exist
+        for item in ${{ inputs.qml-files }}; do
+          if [[ ! -e "$item" ]]; then
+            echo "Error: QML file or directory does not exist: $item"
+            exit 1
+          fi
+        done
+
+        # Validate score file if provided
+        if [[ -n "${{ inputs.score-file }}" ]] && [[ ! -f "${{ inputs.score-file }}" ]]; then
+          echo "Error: Score file does not exist: ${{ inputs.score-file }}"
+          exit 1
+        fi
+
+    - name: Install dependencies (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          p7zip-full \
+          curl \
+          wget \
+          file \
+          desktop-file-utils \
+          zsync
+
+    - name: Install dependencies (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        # Install required tools for macOS packaging
+        brew install p7zip || true
+        brew install create-dmg || true
+        # Ensure developer tools are available
+        xcode-select --install 2>/dev/null || true
+
+    - name: Install dependencies (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        # Install required tools for Windows packaging
+        choco install 7zip -y
+        choco install curl -y
+        # Ensure we have a C compiler (MinGW)
+        choco install mingw -y
+
+    - name: Create output directory
+      shell: bash
+      run: |
+        mkdir -p "${{ inputs.output-path }}"
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          # Convert Windows path to Unix-style for bash
+          OUTPUT_PATH=$(cygpath -u "$(cd "${{ inputs.output-path }}" && pwd)")
+        else
+          OUTPUT_PATH=$(cd "${{ inputs.output-path }}" && pwd)
+        fi
+        echo "OUTPUT_PATH=$OUTPUT_PATH" >> $GITHUB_ENV
+
+    - name: Build package arguments
+      shell: bash
+      run: |
+        # Build QML arguments
+        QML_ARGS=""
+        for item in ${{ inputs.qml-files }}; do
+          QML_ARGS="$QML_ARGS --qml \"$item\""
+        done
+        echo "QML_ARGS=$QML_ARGS" >> $GITHUB_ENV
+
+        # Build score argument
+        if [[ -n "${{ inputs.score-file }}" ]]; then
+          echo "SCORE_ARG=--score \"${{ inputs.score-file }}\"" >> $GITHUB_ENV
+        else
+          echo "SCORE_ARG=" >> $GITHUB_ENV
+        fi
+
+        # Build platform arguments
+        if [[ -n "${{ inputs.platforms }}" ]]; then
+          PLATFORM_ARGS=""
+          for platform in ${{ inputs.platforms }}; do
+            PLATFORM_ARGS="$PLATFORM_ARGS --platform $platform"
+          done
+          echo "PLATFORM_ARGS=$PLATFORM_ARGS" >> $GITHUB_ENV
+        else
+          echo "PLATFORM_ARGS=" >> $GITHUB_ENV
+        fi
+
+    - name: Create custom app packages
+      shell: bash
+      run: |
+        cd score-tools/tools
+
+        # Build the command
+        CMD="./create-app.sh"
+        CMD="$CMD ${{ env.QML_ARGS }}"
+        CMD="$CMD ${{ env.SCORE_ARG }}"
+        CMD="$CMD --output \"${{ env.OUTPUT_PATH }}\""
+        CMD="$CMD --name \"${{ inputs.app-name }}\""
+        CMD="$CMD --release \"${{ inputs.release-tag }}\""
+        CMD="$CMD ${{ env.PLATFORM_ARGS }}"
+
+        echo "Executing: $CMD"
+        eval "$CMD"
+
+    - name: Set output path
+      id: set-output
+      shell: bash
+      run: |
+        echo "packages-path=${{ env.OUTPUT_PATH }}" >> $GITHUB_OUTPUT
+
+    - name: Display created packages
+      shell: bash
+      run: |
+        echo "Created packages:"
+        ls -lah "${{ env.OUTPUT_PATH }}"
