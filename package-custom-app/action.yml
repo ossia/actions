@@ -109,39 +109,53 @@ runs:
 
     - name: Install dependencies (Windows)
       if: runner.os == 'Windows'
-      shell: pwsh
+      shell: bash
       run: |
         # Install required tools for Windows packaging
         choco install 7zip -y
-        choco install curl -y
-        # Ensure we have a C compiler (MinGW)
-        choco install mingw -y
+        # MinGW is already available on GitHub Actions runners
 
-    - name: Create output directory
+    - name: Set up paths
       shell: bash
       run: |
+        # Store the repository root as absolute path
+        REPO_ROOT=$(pwd)
+        echo "REPO_ROOT=$REPO_ROOT" >> $GITHUB_ENV
+
+        # Store the score tools directory as absolute path
+        SCORE_TOOLS_DIR="$REPO_ROOT/score-tools/tools"
+        echo "SCORE_TOOLS_DIR=$SCORE_TOOLS_DIR" >> $GITHUB_ENV
+
+        # Create and store absolute output path
         mkdir -p "${{ inputs.output-path }}"
-        if [[ "$RUNNER_OS" == "Windows" ]]; then
-          # Convert Windows path to Unix-style for bash
-          OUTPUT_PATH=$(cygpath -u "$(cd "${{ inputs.output-path }}" && pwd)")
-        else
-          OUTPUT_PATH=$(cd "${{ inputs.output-path }}" && pwd)
-        fi
+        OUTPUT_PATH=$(cd "${{ inputs.output-path }}" && pwd)
         echo "OUTPUT_PATH=$OUTPUT_PATH" >> $GITHUB_ENV
 
     - name: Build package arguments
       shell: bash
       run: |
-        # Build QML arguments
+        # Build QML arguments with absolute paths
         QML_ARGS=""
         for item in ${{ inputs.qml-files }}; do
-          QML_ARGS="$QML_ARGS --qml \"$item\""
+          # Convert to absolute path
+          if [[ "$item" = /* ]]; then
+            ABS_ITEM="$item"
+          else
+            ABS_ITEM="$REPO_ROOT/$item"
+          fi
+          QML_ARGS="$QML_ARGS --qml \"$ABS_ITEM\""
         done
         echo "QML_ARGS=$QML_ARGS" >> $GITHUB_ENV
 
-        # Build score argument
+        # Build score argument with absolute path
         if [[ -n "${{ inputs.score-file }}" ]]; then
-          echo "SCORE_ARG=--score \"${{ inputs.score-file }}\"" >> $GITHUB_ENV
+          SCORE_FILE="${{ inputs.score-file }}"
+          if [[ "$SCORE_FILE" = /* ]]; then
+            ABS_SCORE="$SCORE_FILE"
+          else
+            ABS_SCORE="$REPO_ROOT/$SCORE_FILE"
+          fi
+          echo "SCORE_ARG=--score \"$ABS_SCORE\"" >> $GITHUB_ENV
         else
           echo "SCORE_ARG=" >> $GITHUB_ENV
         fi
@@ -160,10 +174,11 @@ runs:
     - name: Create custom app packages
       shell: bash
       run: |
-        cd score-tools/tools
+        # Run from the repository root, not from the tools directory
+        cd "$REPO_ROOT"
 
-        # Build the command
-        CMD="./create-app.sh"
+        # Build the command with absolute path to script
+        CMD="$SCORE_TOOLS_DIR/create-app.sh"
         CMD="$CMD ${{ env.QML_ARGS }}"
         CMD="$CMD ${{ env.SCORE_ARG }}"
         CMD="$CMD --output \"${{ env.OUTPUT_PATH }}\""
@@ -171,7 +186,8 @@ runs:
         CMD="$CMD --release \"${{ inputs.release-tag }}\""
         CMD="$CMD ${{ env.PLATFORM_ARGS }}"
 
-        echo "Executing: $CMD"
+        echo "Executing from: $(pwd)"
+        echo "Command: $CMD"
         eval "$CMD"
 
     - name: Set output path
