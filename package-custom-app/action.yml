@@ -31,6 +31,26 @@ inputs:
     description: 'Branch of score repository to use'
     required: false
     default: 'master'
+  macos-certificate-base64:
+    description: 'Base64-encoded P12 certificate for macOS code signing (optional)'
+    required: false
+    default: ''
+  macos-certificate-password:
+    description: 'Password for macOS P12 certificate (optional)'
+    required: false
+    default: ''
+  macos-notarize-team-id:
+    description: 'Apple Developer Team ID for notarization (optional)'
+    required: false
+    default: ''
+  macos-notarize-apple-id:
+    description: 'Apple ID for notarization (optional)'
+    required: false
+    default: ''
+  macos-notarize-password:
+    description: 'App-specific password for notarization (optional)'
+    required: false
+    default: ''
 
 outputs:
   packages-path:
@@ -108,11 +128,11 @@ runs:
         xcode-select --install 2>/dev/null || true
 
     - name: Import code signing certificate (macOS)
-      if: runner.os == 'macOS' && secrets.MAC_CERT_B64 != ''
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != ''
       uses: jcelerier/import-codesign-certs@master
       with:
-        p12-file-base64: ${{ secrets.MAC_CERT_B64 }}
-        p12-password: ${{ secrets.MAC_CERT_PASSWORD }}
+        p12-file-base64: ${{ inputs.macos-certificate-base64 }}
+        p12-password: ${{ inputs.macos-certificate-password }}
 
     - name: Install dependencies (Windows)
       if: runner.os == 'Windows'
@@ -186,15 +206,15 @@ runs:
         # Set up code signing environment variables for macOS
         if [[ "$RUNNER_OS" == "macOS" ]]; then
           # Export code signing identity if certificate was imported
-          if [[ -n "${MAC_CERT_B64:-}" ]]; then
+          if [[ -n "${{ inputs.macos-certificate-base64 }}" ]]; then
             export MAC_CODESIGN_IDENTITY="ossia.io"
           fi
 
           # Export notarization credentials if available
-          if [[ -n "${MAC_NOTARIZE_TEAM_ID:-}" ]]; then
-            export MAC_NOTARIZE_TEAM_ID="${MAC_NOTARIZE_TEAM_ID}"
-            export MAC_NOTARIZE_APPLE_ID="${MAC_NOTARIZE_APPLE_ID}"
-            export MAC_NOTARIZE_PASSWORD="${MAC_NOTARIZE_PASSWORD}"
+          if [[ -n "${{ inputs.macos-notarize-team-id }}" ]]; then
+            export MAC_NOTARIZE_TEAM_ID="${{ inputs.macos-notarize-team-id }}"
+            export MAC_NOTARIZE_APPLE_ID="${{ inputs.macos-notarize-apple-id }}"
+            export MAC_NOTARIZE_PASSWORD="${{ inputs.macos-notarize-password }}"
           fi
         fi
 
@@ -210,12 +230,6 @@ runs:
         echo "Executing from: $(pwd)"
         echo "Command: $CMD"
         eval "$CMD"
-      env:
-        MAC_CERT_B64: ${{ secrets.MAC_CERT_B64 }}
-        MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
-        MAC_NOTARIZE_TEAM_ID: ${{ secrets.MAC_NOTARIZE_TEAM_ID }}
-        MAC_NOTARIZE_APPLE_ID: ${{ secrets.MAC_NOTARIZE_APPLE_ID }}
-        MAC_NOTARIZE_PASSWORD: ${{ secrets.MAC_NOTARIZE_PASSWORD }}
 
     - name: Set output path
       id: set-output
