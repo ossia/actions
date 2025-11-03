@@ -107,13 +107,19 @@ runs:
         # Ensure developer tools are available
         xcode-select --install 2>/dev/null || true
 
+    - name: Import code signing certificate (macOS)
+      if: runner.os == 'macOS' && secrets.MAC_CERT_B64 != ''
+      uses: jcelerier/import-codesign-certs@master
+      with:
+        p12-file-base64: ${{ secrets.MAC_CERT_B64 }}
+        p12-password: ${{ secrets.MAC_CERT_PASSWORD }}
+
     - name: Install dependencies (Windows)
       if: runner.os == 'Windows'
       shell: bash
       run: |
         # Install required tools for Windows packaging
         choco install 7zip -y
-        # MinGW is already available on GitHub Actions runners
 
     - name: Set up paths
       shell: bash
@@ -177,6 +183,21 @@ runs:
         # Run from the repository root, not from the tools directory
         cd "$REPO_ROOT"
 
+        # Set up code signing environment variables for macOS
+        if [[ "$RUNNER_OS" == "macOS" ]]; then
+          # Export code signing identity if certificate was imported
+          if [[ -n "${MAC_CERT_B64:-}" ]]; then
+            export MAC_CODESIGN_IDENTITY="ossia.io"
+          fi
+
+          # Export notarization credentials if available
+          if [[ -n "${MAC_NOTARIZE_TEAM_ID:-}" ]]; then
+            export MAC_NOTARIZE_TEAM_ID="${MAC_NOTARIZE_TEAM_ID}"
+            export MAC_NOTARIZE_APPLE_ID="${MAC_NOTARIZE_APPLE_ID}"
+            export MAC_NOTARIZE_PASSWORD="${MAC_NOTARIZE_PASSWORD}"
+          fi
+        fi
+
         # Build the command with absolute path to script
         CMD="$SCORE_TOOLS_DIR/create-app.sh"
         CMD="$CMD ${{ env.QML_ARGS }}"
@@ -189,6 +210,12 @@ runs:
         echo "Executing from: $(pwd)"
         echo "Command: $CMD"
         eval "$CMD"
+      env:
+        MAC_CERT_B64: ${{ secrets.MAC_CERT_B64 }}
+        MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+        MAC_NOTARIZE_TEAM_ID: ${{ secrets.MAC_NOTARIZE_TEAM_ID }}
+        MAC_NOTARIZE_APPLE_ID: ${{ secrets.MAC_NOTARIZE_APPLE_ID }}
+        MAC_NOTARIZE_PASSWORD: ${{ secrets.MAC_NOTARIZE_PASSWORD }}
 
     - name: Set output path
       id: set-output
