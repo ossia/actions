@@ -4,6 +4,46 @@ inputs:
   app-name:
     description: 'Name of the custom application'
     required: true
+  app-organization:
+    description: 'Organization name (e.g. ossia)'
+    required: true
+    default: ''
+  app-domain:
+    description: 'Organization domain (e.g. ossia.io)'
+    required: true
+    default: ''
+  app-identifier:
+    description: 'App identifier in reverse-DNS (e.g. io.ossia.score)'
+    required: true
+    default: ''
+  app-description:
+    description: 'One-line description of your app'
+    required: true
+    default: ''
+  app-copyright:
+    description: 'One-line copyright of your app'
+    required: true
+    default: ''
+  app-version:
+    description: 'Version number, e.g. 4.0.1'
+    required: true
+    default: ''
+  app-appdata-xml:
+    description: 'Path to .appdata.xml, for AppImage integration'
+    required: false
+    default: ''
+  app-ico:
+    description: 'Path to .ico (Windows icon)'
+    required: true
+    default: ''
+  app-icns:
+    description: 'Path to .icns (macOS icon)'
+    required: true
+    default: ''
+  app-png:
+    description: 'Path to .png (Linux icon)'
+    required: true
+    default: ''
   qml-files:
     description: 'Space-separated list of QML files or directories to include'
     required: true
@@ -81,15 +121,6 @@ runs:
     - name: Validate inputs
       shell: bash
       run: |
-        if [[ -z "${{ inputs.app-name }}" ]]; then
-          echo "Error: app-name is required"
-          exit 1
-        fi
-        if [[ -z "${{ inputs.qml-files }}" ]]; then
-          echo "Error: qml-files is required"
-          exit 1
-        fi
-
         # Validate QML files exist
         for item in ${{ inputs.qml-files }}; do
           if [[ ! -e "$item" ]]; then
@@ -233,8 +264,18 @@ runs:
         CMD="$CMD ${{ env.QML_ARGS }}"
         CMD="$CMD ${{ env.SCORE_ARG }}"
         CMD="$CMD --output \"${{ env.OUTPUT_PATH }}\""
-        CMD="$CMD --name \"${{ inputs.app-name }}\""
         CMD="$CMD --release \"${{ inputs.release-tag }}\""
+        CMD="$CMD --app-name \"${{ inputs.app-name }}\""
+        CMD="$CMD --app-organization \"${{ inputs.app-organization }}\""
+        CMD="$CMD --app-domain \"${{ inputs.app-domain }}\""
+        CMD="$CMD --app-identifier \"${{ inputs.app-identifier }}\""
+        CMD="$CMD --app-description \"${{ inputs.app-description }}\""
+        CMD="$CMD --app-copyright \"${{ inputs.app-copyright }}\""
+        CMD="$CMD --app-version \"${{ inputs.app-version }}\""
+        CMD="$CMD --app-appdata-xml \"${{ inputs.app-appdata-xml }}\""
+        CMD="$CMD --app-ico \"${{ inputs.app-ico }}\""
+        CMD="$CMD --app-icns \"${{ inputs.app-icns }}\""
+        CMD="$CMD --app-png \"${{ inputs.app-png }}\""
         CMD="$CMD ${{ env.PLATFORM_ARGS }}"
 
         echo "Executing from: $(pwd)"
