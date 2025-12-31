@@ -55,6 +55,9 @@ inputs:
     description: 'ossia score release tag to use (default: continuous)'
     required: false
     default: 'continuous'
+  score-build-id:
+    description: 'An artifact id that contains a built version of score, e.g. built with the custom-score-build action'
+    required: false
   output-path:
     description: 'Output directory for generated packages'
     required: false
@@ -67,7 +70,7 @@ inputs:
     description: 'Repository containing ossia score and tools/create-app.sh script'
     required: false
     default: 'https://github.com/ossia/score.git'
-  score-branch:
+  score-ref:
     description: 'Branch of score repository to use'
     required: false
     default: 'master'
@@ -189,9 +192,18 @@ runs:
         OUTPUT_PATH=$(cd "${{ inputs.output-path }}" && pwd)
         echo "OUTPUT_PATH=$OUTPUT_PATH" >> $GITHUB_ENV
 
+    - name: Download built packages
+      uses: actions/download-artifact@v7
+      if: inputs.score-build-id != ''
+      with:
+        artifact-ids: ${{ inputs.score-build-id }}
+        path: score-build
+        
     - name: Build package arguments
       shell: bash
       run: |
+        ls -R score-build
+
         # Build QML arguments with absolute paths
         QML_ARGS=""
         for item in ${{ inputs.qml-files }}; do
@@ -265,7 +277,16 @@ runs:
         CMD="$CMD ${{ env.QML_ARGS }}"
         CMD="$CMD ${{ env.SCORE_ARG }}"
         CMD="$CMD --output \"${{ env.OUTPUT_PATH }}\""
-        CMD="$CMD --release \"${{ inputs.release-tag }}\""
+
+        if [[ -n "${{ inputs.release-tag }}" ]]; then
+          CMD="$CMD --release \"${{ inputs.release-tag }}\""
+        else if [[ -n "${{ inputs.score-build-id }}" ]]; then
+          echo TODO
+        else if [[ -n "${{ inputs.score-build-id }}" ]]; then
+          echo "One of release-tag or score-build-id has to be set"
+          exit 1
+        fi
+
         CMD="$CMD --app-name \"${{ inputs.app-name }}\""
         CMD="$CMD --app-organization \"${{ inputs.app-organization }}\""
         CMD="$CMD --app-domain \"${{ inputs.app-domain }}\""
