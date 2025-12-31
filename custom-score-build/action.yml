@@ -119,6 +119,7 @@ runs:
           export CPU_ARCH=x86_64
         fi
         export MACOS_ARCH=$CPU_ARCH
+        export CI_IS_AZURE=0
         
         export GITTAGNOV=$(echo "$GITHUB_REF" | sed "s/.*\///;s/^v//")
         export BUILD_ARTIFACTSTAGINGDIRECTORY="$PWD/staging"

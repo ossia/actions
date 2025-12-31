@@ -198,12 +198,10 @@ runs:
       with:
         artifact-ids: ${{ inputs.score-build-id }}
         path: score-build
-        
+
     - name: Build package arguments
       shell: bash
       run: |
-        ls -R score-build
-
         # Build QML arguments with absolute paths
         QML_ARGS=""
         for item in ${{ inputs.qml-files }}; do
@@ -244,13 +242,22 @@ runs:
     - name: Create custom app packages
       shell: bash
       run: |
+        if [[ "$RUNNER_OS" == "Linux" ]]; then
+          export SCORE_LOCAL_INSTALLER=score-build/*.AppImage
+        elif [[ "$RUNNER_OS" == "Windows" ]]; then
+          export SCORE_LOCAL_INSTALLER=score-build/*.exe
+        elif [[ "$RUNNER_OS" == "macOS" ]]; then
+          export SCORE_LOCAL_INSTALLER=score-build/*.dmg
+        fi
+
         # Run from the repository root, not from the tools directory
         cd "$REPO_ROOT"
 
         # Set up code signing environment variables for macOS
         if [[ "$RUNNER_OS" == "macOS" ]]; then
           # Export code signing identity if certificate was imported
-          if [[ -n "${{ inputs.macos-certificate-base64 }}" ]]; then
+          if [[ -n "${{ inputs.macos-notarize-apple-id }}" ]]; then
+            # FIXME
             echo "Setting up code signing with identity: ossia.io"
             export MAC_CODESIGN_IDENTITY="ossia.io"
           else
@@ -280,9 +287,9 @@ runs:
 
         if [[ -n "${{ inputs.release-tag }}" ]]; then
           CMD="$CMD --release \"${{ inputs.release-tag }}\""
-        else if [[ -n "${{ inputs.score-build-id }}" ]]; then
-          echo TODO
-        else if [[ -n "${{ inputs.score-build-id }}" ]]; then
+        elif [[ -n "${{ inputs.score-build-id }}" ]]; then
+          CMD="$CMD --local-installer $SCORE_LOCAL_INSTALLER"
+        else
           echo "One of release-tag or score-build-id has to be set"
           exit 1
         fi
