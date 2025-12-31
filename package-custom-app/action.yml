@@ -111,6 +111,7 @@ runs:
           tools/create-app-linux.sh
           tools/create-app-macos.sh
           tools/create-app-windows.sh
+          tools/launcher/launcher.c
         sparse-checkout-cone-mode: false
 
     - name: Make scripts executable
