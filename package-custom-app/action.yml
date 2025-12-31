@@ -108,7 +108,7 @@ runs:
       with:
         repository: ossia/score
         path: score-tools
-        ref: ${{ inputs.score-branch }}
+        ref: ${{ inputs.score-ref }}
         sparse-checkout: |
           tools/create-app.sh
           tools/create-app-linux.sh
