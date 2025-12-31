@@ -163,7 +163,7 @@ runs:
         xcode-select --install 2>/dev/null || true
 
     - name: Import code signing certificate (macOS)
-      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != ''
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != '' && inputs.score-build-id == ''
       uses: jcelerier/import-codesign-certs@master
       with:
         p12-file-base64: ${{ inputs.macos-certificate-base64 }}
@@ -285,10 +285,10 @@ runs:
         CMD="$CMD ${{ env.SCORE_ARG }}"
         CMD="$CMD --output \"${{ env.OUTPUT_PATH }}\""
 
-        if [[ -n "${{ inputs.release-tag }}" ]]; then
-          CMD="$CMD --release \"${{ inputs.release-tag }}\""
-        elif [[ -n "${{ inputs.score-build-id }}" ]]; then
+        if [[ -n "${{ inputs.score-build-id }}" ]]; then
           CMD="$CMD --local-installer $SCORE_LOCAL_INSTALLER"
+        elif [[ -n "${{ inputs.release-tag }}" ]]; then
+          CMD="$CMD --release \"${{ inputs.release-tag }}\""
         else
           echo "One of release-tag or score-build-id has to be set"
           exit 1
