@@ -1,0 +1,114 @@
+name: Custom score build
+description: "Create a custom ossia score build"
+inputs:
+  cmake-options:
+    description: 'Additional CMake options'
+    required: true
+  cmake-cache:
+    description: 'Custom CMake cache file'
+    required: false
+  score-repo:
+    description: 'Custom ossia score repo'
+    required: true
+    default: 'ossia/score'
+  score-ref:
+    description: 'Custom ref to use'
+    required: true
+    default: 'master'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        repo: ${{ inputs.score-repo }}
+        ref: ${{ inputs.score-ref }}
+        submodules: 'recursive'
+
+    - uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: '>=16'
+
+    - uses: jcelerier/import-codesign-certs@master
+      with:
+        p12-file-base64: ${{ secrets.MAC_CERT_B64 }}
+        p12-password: ${{ secrets.MAC_CERT_PASSWORD }}
+
+    - name: Dependencies
+      shell: bash
+      run: |
+        if [[ "$RUNNER_ARCH" -eq "ARM64" ]]; then
+          export CPU_ARCH=aarch64
+        else
+          export CPU_ARCH=x86_64
+        fi
+        
+        if [[ "$RUNNER_OS" -eq "Linux" ]]; then
+          ./ci/appimage.deps.sh
+        elif [[ "$RUNNER_OS" -eq "Windows" ]]; then
+          ./ci/win32.deps.sh
+        elif [[ "$RUNNER_OS" -eq "macOS" ]]; then
+          ./ci/osx.package.deps.sh
+        fi
+
+      env:
+        MACOS_ARCH: "aarch64"
+        MAC_CERT_B64: ${{ secrets.MAC_CERT_B64 }}
+        MAC_CODESIGN_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+
+    - name: Build
+      shell: bash
+      run: |
+        if [[ "$RUNNER_ARCH" -eq "ARM64" ]]; then
+          export CPU_ARCH=aarch64
+        else
+          export CPU_ARCH=x86_64
+        fi
+        
+        if [[ "$RUNNER_OS" -eq "Linux" ]]; then
+          ./ci/appimage.build.sh
+        elif [[ "$RUNNER_OS" -eq "Windows" ]]; then
+          ./ci/win32.build.sh
+        elif [[ "$RUNNER_OS" -eq "macOS" ]]; then
+          ./ci/osx.package.build.sh
+        fi
+      env:
+        MACOS_ARCH: "aarch64"
+        SCORE_EXTRA_CMAKE_ARGS: ${{ inputs.cmake-options }}
+        SCORE_CMAKE_CACHE: ${{ inputs.cmake-cache }}
+
+    - name: Deploy
+      id: deploy
+      shell: bash
+      run: |
+        if [[ "$RUNNER_ARCH" -eq "ARM64" ]]; then
+          export CPU_ARCH=aarch64
+        else
+          export CPU_ARCH=x86_64
+        fi
+        
+        export GITTAGNOV=$(echo "$GITHUB_REF" | sed "s/.*\///;s/^v//")
+        export BUILD_ARTIFACTSTAGINGDIRECTORY="$PWD/staging"
+        mkdir -p "$BUILD_ARTIFACTSTAGINGDIRECTORY"
+        
+        if [[ "$RUNNER_OS" -eq "Linux" ]]; then
+          ./ci/appimage.deploy.sh
+          echo "release-name=appimage-$CPU_ARCH" >> $GITHUB_OUTPUT
+        elif [[ "$RUNNER_OS" -eq "Windows" ]]; then
+          ./ci/win32.deploy.sh
+          echo "release-name=windows-$CPU_ARCH" >> $GITHUB_OUTPUT
+        elif [[ "$RUNNER_OS" -eq "macOS" ]]; then
+          ./ci/osx.package.deploy.sh
+          echo "release-name=macos-$CPU_ARCH" >> $GITHUB_OUTPUT
+        fi
+      env:
+        MACOS_ARCH: "aarch64"
+        MAC_ALTOOL_PASSWORD: ${{ secrets.MAC_ALTOOL_PASSWORD }}
+
+    - name: Upload build
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.deploy.outputs.release-name }}
+        path: |
+          staging/*.*
