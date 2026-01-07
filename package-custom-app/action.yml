@@ -47,6 +47,9 @@ inputs:
   qml-files:
     description: 'Space-separated list of QML files or directories to include'
     required: true
+  qrc-file:
+    description: 'Path to a .qrc file to bundle resources'
+    required: false
   score-file:
     description: 'Score file to autoplay (optional)'
     required: false
@@ -116,6 +119,13 @@ runs:
           tools/create-app-windows.sh
           tools/launcher/launcher.c
         sparse-checkout-cone-mode: false
+
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v4
+      if: inputs.qrc-file != ''
+      with:
+        add-tools-to-path: true
+        version: '6.10.1'
 
     - name: Make scripts executable
       shell: bash
@@ -300,6 +310,11 @@ runs:
         CMD="$CMD --app-identifier \"${{ inputs.app-identifier }}\""
         CMD="$CMD --app-description \"${{ inputs.app-description }}\""
         CMD="$CMD --app-copyright \"${{ inputs.app-copyright }}\""
+
+        if [[ -n "${{ inputs.qrc-file }}" ]]; then
+          CMD="$CMD --app-qrc ${{ inputs.qrc-file }}"
+        fi
+
         CMD="$CMD --app-version \"${{ inputs.app-version }}\""
         CMD="$CMD --app-appdata-xml $PWD/\"${{ inputs.app-appdata-xml }}\""
         CMD="$CMD --app-ico $PWD/\"${{ inputs.app-ico }}\""
