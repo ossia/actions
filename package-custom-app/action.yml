@@ -263,6 +263,11 @@ runs:
         # Run from the repository root, not from the tools directory
         cd "$REPO_ROOT"
 
+        if [[ -n "${{ inputs.qrc-file }}" ]]; then
+          RCC_PATH=$(find .. -name rcc)
+          PATH="$PATH;$(dirname $RCC_PATH)"
+        fi
+
         # Set up code signing environment variables for macOS
         if [[ "$RUNNER_OS" == "macOS" ]]; then
           # Export code signing identity if certificate was imported
