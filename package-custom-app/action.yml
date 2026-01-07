@@ -254,19 +254,29 @@ runs:
       run: |
         if [[ "$RUNNER_OS" == "Linux" ]]; then
           export SCORE_LOCAL_INSTALLER=score-build/*.AppImage
+
+          if [[ -n "${{ inputs.qrc-file }}" ]]; then
+            RCC_PATH=$(find .. -name rcc -type f)
+            export PATH="$PATH:$PWD/$(dirname $RCC_PATH)"
+          fi
         elif [[ "$RUNNER_OS" == "Windows" ]]; then
           export SCORE_LOCAL_INSTALLER=score-build/*.exe
+
+          if [[ -n "${{ inputs.qrc-file }}" ]]; then
+            RCC_PATH=$(find .. -name rcc.exe -type f)
+            export PATH="$PATH:$PWD/$(dirname $RCC_PATH)"
+          fi
         elif [[ "$RUNNER_OS" == "macOS" ]]; then
           export SCORE_LOCAL_INSTALLER=score-build/*.dmg
+
+          if [[ -n "${{ inputs.qrc-file }}" ]]; then
+            RCC_PATH=$(find .. -name rcc -type f)
+            export PATH="$PATH:$PWD/$(dirname $RCC_PATH)"
+          fi
         fi
 
         # Run from the repository root, not from the tools directory
         cd "$REPO_ROOT"
-
-        if [[ -n "${{ inputs.qrc-file }}" ]]; then
-          RCC_PATH=$(find .. -name rcc)
-          PATH="$PATH;$(dirname $RCC_PATH)"
-        fi
 
         # Set up code signing environment variables for macOS
         if [[ "$RUNNER_OS" == "macOS" ]]; then
@@ -317,7 +327,7 @@ runs:
         CMD="$CMD --app-copyright \"${{ inputs.app-copyright }}\""
 
         if [[ -n "${{ inputs.qrc-file }}" ]]; then
-          CMD="$CMD --app-qrc ${{ inputs.qrc-file }}"
+          CMD="$CMD --app-qrc $PWD/${{ inputs.qrc-file }}"
         fi
 
         CMD="$CMD --app-version \"${{ inputs.app-version }}\""
@@ -329,6 +339,7 @@ runs:
 
         echo "Executing from: $(pwd)"
         echo "Command: $CMD"
+
         eval "$CMD"
 
     - name: Set output path
