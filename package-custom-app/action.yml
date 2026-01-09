@@ -20,6 +20,10 @@ inputs:
     description: 'One-line description of your app'
     required: true
     default: ''
+  app-environment:
+    description: 'Optional environment variables'
+    required: false
+    default: ''
   app-copyright:
     description: 'One-line copyright of your app'
     required: true
@@ -117,7 +121,7 @@ runs:
           tools/create-app-linux.sh
           tools/create-app-macos.sh
           tools/create-app-windows.sh
-          tools/launcher/launcher.c
+          tools/launcher/launcher.cpp
         sparse-checkout-cone-mode: false
 
     - name: Install Qt
@@ -328,6 +332,10 @@ runs:
 
         if [[ -n "${{ inputs.qrc-file }}" ]]; then
           CMD="$CMD --app-qrc $PWD/${{ inputs.qrc-file }}"
+        fi
+
+        if [[ -n "${{ inputs.app-environment }}" ]]; then
+          CMD="$CMD --app-environment $PWD/${{ inputs.app-environment }}"
         fi
 
         CMD="$CMD --app-version \"${{ inputs.app-version }}\""
