@@ -58,7 +58,7 @@ runs:
         xcode-version: '>=16'
 
     - uses: jcelerier/import-codesign-certs@master
-      if: runner.os == 'macOS'
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != ''
       with:
         p12-file-base64: ${{ inputs.macos-certificate-base64 }}
         p12-password: ${{ inputs.macos-certificate-password }}
