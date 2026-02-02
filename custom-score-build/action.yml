@@ -44,6 +44,11 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Long path support
+      if: runner.os == 'Windows'
+      shell: bash
+      run: git config --global core.longpaths true
+
     - name: Checkout code
       uses: actions/checkout@v4
       with:
