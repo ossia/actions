@@ -1,0 +1,184 @@
+name: 'Build Avendish ML Inference Plugin'
+description: >
+  Build an Avendish ML inference plugin (ml-inference) — texture I/O +
+  ONNX Runtime. Targets Max/MSP (jit.gl.*), TouchDesigner (TOP), GStreamer,
+  Godot. ONNX Runtime is fetched automatically by the template's
+  cmake/onnxruntime.cmake. Uses the ossia SDK (clang+lld+Boost).
+
+inputs:
+  plugin-name:
+    description: 'Plugin C-name used for artifact names (e.g. my_ml_inference)'
+    required: true
+  cmake-args:
+    description: 'Extra CMake arguments (-D...)'
+    required: false
+    default: ''
+  build-type:
+    description: 'CMake build type'
+    required: false
+    default: 'Release'
+  llvm-version:
+    description: 'LLVM/clang/lld version to install on Linux via apt.llvm.org'
+    required: false
+    default: '21'
+  artifact-retention-days:
+    description: 'How long to keep build artifacts'
+    required: false
+    default: '14'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout ossia/score (3rdparty deps)
+      uses: actions/checkout@v6
+      with:
+        repository: ossia/score
+        submodules: 'recursive'
+        path: score
+        fetch-depth: 1
+
+    - name: Checkout Max SDK
+      uses: actions/checkout@v6
+      with:
+        repository: jcelerier/max-sdk-base
+        submodules: 'recursive'
+        path: max-sdk-base
+
+    - name: Checkout TouchDesigner SDK
+      uses: actions/checkout@v6
+      with:
+        repository: jcelerier/customoperatorsamples
+        path: touchdesigner-sdk
+
+    - name: Install Linux toolchain (clang + lld + GStreamer)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          lsb-release wget software-properties-common gnupg ccache ninja-build uuid-runtime \
+          libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
+          libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+        curl -fsSL https://apt.llvm.org/llvm.sh -o llvm.sh
+        chmod +x llvm.sh
+        sudo ./llvm.sh ${{ inputs.llvm-version }}
+        sudo apt-get install -y --no-install-recommends \
+          clang-${{ inputs.llvm-version }} lld-${{ inputs.llvm-version }} \
+          libc++-${{ inputs.llvm-version }}-dev libc++abi-${{ inputs.llvm-version }}-dev
+
+    - name: Install macOS toolchain helpers
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        brew update
+        brew install ninja ccache gstreamer
+
+    - name: Install Windows toolchain helpers
+      if: runner.os == 'Windows'
+      shell: bash
+      run: |
+        choco install -y ninja
+
+    - name: Download ossia SDK (clang+lld+Boost via fetch-sdk.sh)
+      shell: bash
+      run: |
+        curl -fsSL https://raw.githubusercontent.com/ossia/score/master/tools/fetch-sdk.sh -o fetch-sdk.sh
+        chmod +x fetch-sdk.sh
+        ./fetch-sdk.sh
+
+    - name: Setup ccache
+      if: runner.os != 'Windows'
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: ${{ inputs.plugin-name }}-${{ runner.os }}-ccache
+
+    - name: Cache CMake FetchContent (includes ONNX Runtime tarball)
+      uses: actions/cache@v5
+      with:
+        path: ${{ github.workspace }}/build/_deps
+        key: deps-${{ inputs.plugin-name }}-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'cmake/onnxruntime.cmake') }}
+        restore-keys: |
+          deps-${{ inputs.plugin-name }}-${{ runner.os }}-
+
+    - name: Configure
+      shell: bash
+      run: |
+        case "${{ runner.os }}" in
+          Linux)
+            SDK_DIR=/opt/ossia-sdk-x86_64
+            LLVM=${{ inputs.llvm-version }}
+            TOOLCHAIN_FLAGS="
+              -DCMAKE_C_COMPILER=/usr/bin/clang-$LLVM
+              -DCMAKE_CXX_COMPILER=/usr/bin/clang++-$LLVM
+              -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld-$LLVM
+              -DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld-$LLVM
+              -DCMAKE_MODULE_LINKER_FLAGS=-fuse-ld=lld-$LLVM"
+            ;;
+          macOS)
+            ARCH=$(uname -m)
+            [ "$ARCH" = "arm64" ] && ARCH=aarch64
+            SDK_DIR=/opt/ossia-sdk-$ARCH
+            TOOLCHAIN_FLAGS=""
+            ;;
+          Windows)
+            SDK_DIR=/c/ossia-sdk-x86_64
+            export PATH="$SDK_DIR/llvm/bin:$SDK_DIR/cmake/bin:$PATH"
+            TOOLCHAIN_FLAGS="
+              -DCMAKE_C_COMPILER=$SDK_DIR/llvm/bin/clang.exe
+              -DCMAKE_CXX_COMPILER=$SDK_DIR/llvm/bin/clang++.exe
+              -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=$SDK_DIR/llvm/bin/ld.lld.exe
+              -DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=$SDK_DIR/llvm/bin/ld.lld.exe
+              -DCMAKE_MODULE_LINKER_FLAGS=-fuse-ld=$SDK_DIR/llvm/bin/ld.lld.exe"
+            ;;
+        esac
+
+        MAX_SDK="$GITHUB_WORKSPACE/max-sdk-base"
+        TD_SDK="$GITHUB_WORKSPACE/touchdesigner-sdk"
+
+        cmake -S . -B build -G Ninja \
+          -DCMAKE_BUILD_TYPE=${{ inputs.build-type }} \
+          -DBOOST_ROOT="$SDK_DIR/boost" \
+          -DAVND_MAXSDK_PATH="$MAX_SDK" \
+          -DTOUCHDESIGNER_SDK_PATH="$TD_SDK" \
+          $TOOLCHAIN_FLAGS \
+          ${{ inputs.cmake-args }}
+
+    - name: Build
+      shell: bash
+      run: |
+        case "${{ runner.os }}" in
+          Windows) export PATH="/c/ossia-sdk-x86_64/llvm/bin:/c/ossia-sdk-x86_64/cmake/bin:$PATH" ;;
+        esac
+        cmake --build build --config ${{ inputs.build-type }}
+
+    - name: Test
+      shell: bash
+      run: |
+        case "${{ runner.os }}" in
+          Windows) export PATH="/c/ossia-sdk-x86_64/llvm/bin:/c/ossia-sdk-x86_64/cmake/bin:$PATH" ;;
+        esac
+        ctest --test-dir build -C ${{ inputs.build-type }} --output-on-failure
+
+    - name: Collect artifacts
+      if: always()
+      shell: bash
+      run: |
+        mkdir -p artifacts
+        for backend in max td gstreamer godot ossia standalone; do
+          if [ -d "build/$backend" ]; then
+            cp -R "build/$backend" "artifacts/$backend"
+          fi
+        done
+
+    - name: Upload artifacts
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: ${{ inputs.plugin-name }}-${{ runner.os }}
+        path: artifacts/
+        if-no-files-found: ignore
+        retention-days: ${{ inputs.artifact-retention-days }}
+
+branding:
+  icon: 'cpu'
+  color: 'green'
