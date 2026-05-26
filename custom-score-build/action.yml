@@ -15,6 +15,10 @@ inputs:
     description: 'Custom ref to use'
     required: true
     default: 'master'
+  target-arch:
+    description: 'Override target architecture: x86_64 or aarch64. If empty, inferred from RUNNER_ARCH. Use to cross-compile (e.g. Intel macOS on an ARM runner).'
+    required: false
+    default: ''
   macos-certificate-base64:
     description: 'Base64-encoded P12 certificate for macOS code signing (optional)'
     required: false
@@ -72,13 +76,15 @@ runs:
       shell: bash
       working-directory: score-src
       run: |
-        if [[ "$RUNNER_ARCH" == "ARM64" ]]; then
+        if [[ -n "${TARGET_ARCH}" ]]; then
+          export CPU_ARCH="$TARGET_ARCH"
+        elif [[ "$RUNNER_ARCH" == "ARM64" ]]; then
           export CPU_ARCH=aarch64
         else
           export CPU_ARCH=x86_64
         fi
         export MACOS_ARCH=$CPU_ARCH
-        
+
         if [[ "$RUNNER_OS" == "Linux" ]]; then
           ./ci/appimage.deps.sh
         elif [[ "$RUNNER_OS" == "Windows" ]]; then
@@ -88,6 +94,7 @@ runs:
         fi
 
       env:
+        TARGET_ARCH: ${{ inputs.target-arch }}
         MAC_CERT_B64: ${{ inputs.macos-certificate-base64 }}
         MAC_CODESIGN_PASSWORD:  ${{ inputs.macos-certificate-password }}
 
@@ -95,13 +102,15 @@ runs:
       shell: bash
       working-directory: score-src
       run: |
-        if [[ "$RUNNER_ARCH" == "ARM64" ]]; then
+        if [[ -n "${TARGET_ARCH}" ]]; then
+          export CPU_ARCH="$TARGET_ARCH"
+        elif [[ "$RUNNER_ARCH" == "ARM64" ]]; then
           export CPU_ARCH=aarch64
         else
           export CPU_ARCH=x86_64
         fi
         export MACOS_ARCH=$CPU_ARCH
-        
+
         if [[ "$RUNNER_OS" == "Linux" ]]; then
           ./ci/appimage.build.sh
         elif [[ "$RUNNER_OS" == "Windows" ]]; then
@@ -110,6 +119,7 @@ runs:
           ./ci/osx.package.build.sh
         fi
       env:
+        TARGET_ARCH: ${{ inputs.target-arch }}
         SCORE_EXTRA_CMAKE_ARGS: ${{ inputs.cmake-options }}
         SCORE_CMAKE_CACHE: ${{ inputs.cmake-cache }}
 
@@ -118,18 +128,20 @@ runs:
       shell: bash
       working-directory: score-src
       run: |
-        if [[ "$RUNNER_ARCH" == "ARM64" ]]; then
+        if [[ -n "${TARGET_ARCH}" ]]; then
+          export CPU_ARCH="$TARGET_ARCH"
+        elif [[ "$RUNNER_ARCH" == "ARM64" ]]; then
           export CPU_ARCH=aarch64
         else
           export CPU_ARCH=x86_64
         fi
         export MACOS_ARCH=$CPU_ARCH
         export CI_IS_AZURE=0
-        
+
         export GITTAGNOV=$(echo "$GITHUB_REF" | sed "s/.*\///;s/^v//")
         export BUILD_ARTIFACTSTAGINGDIRECTORY="$PWD/staging"
         mkdir -p "$BUILD_ARTIFACTSTAGINGDIRECTORY"
-        
+
         if [[ "$RUNNER_OS" == "Linux" ]]; then
           ./ci/appimage.deploy.sh
           echo "release-name=appimage-$CPU_ARCH" >> $GITHUB_OUTPUT
@@ -141,6 +153,7 @@ runs:
           echo "release-name=macos-$CPU_ARCH" >> $GITHUB_OUTPUT
         fi
       env:
+        TARGET_ARCH: ${{ inputs.target-arch }}
         MAC_ALTOOL_PASSWORD: ${{ inputs.macos-notarize-password }}
 
     - name: Upload build
