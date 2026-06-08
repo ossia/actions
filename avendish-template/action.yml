@@ -16,6 +16,10 @@ inputs:
     description: 'Fetch the VST3 SDK (built lean) and build the VST3 back-end'
     required: false
     default: 'false'
+  pd:
+    description: 'Fetch PureData headers and build the Pd back-end (Linux/macOS; Windows needs pd.lib)'
+    required: false
+    default: 'false'
   run-tests:
     description: 'Run ctest after building (e.g. the Python-binding tests)'
     required: false
@@ -58,6 +62,13 @@ runs:
         repository: steinbergmedia/vst3sdk
         submodules: 'recursive'
         path: vst3sdk
+
+    - name: Checkout PureData headers
+      if: inputs.pd == 'true'
+      uses: actions/checkout@v4
+      with:
+        repository: pure-data/pure-data
+        path: puredata
 
     - name: Checkout TouchDesigner SDK headers
       uses: actions/checkout@v4
@@ -163,6 +174,9 @@ runs:
         if [ "${{ inputs.clap }}" = "true" ]; then
           ARGS+=( -DCMAKE_PREFIX_PATH="$PWD/clap-sdk" )
         fi
+        if [ "${{ inputs.pd }}" = "true" ]; then
+          ARGS+=( -DCMAKE_INCLUDE_PATH="$PWD/puredata/src" )
+        fi
         if [ "${{ inputs.vst3 }}" = "true" ]; then
           ARGS+=( -DVST3_SDK_ROOT="$PWD/vst3sdk"
                   -DSMTG_ENABLE_VSTGUI_SUPPORT=OFF -DSMTG_ADD_VSTGUI=OFF
@@ -195,6 +209,7 @@ runs:
             # -e (not -f): VST3 / macOS-Max bundles are directories; tar recurses into them.
             for file in *; do
               [ -e "$file" ] || continue
+              case "$file" in *.lib|*.exp|*.pdb|*.ilk) continue ;; esac
               cmake -E tar cf "$INSTALL_DIR/$backend-$TRIPLE-$file.zip" --format=zip -- "$file"
             done
           )
