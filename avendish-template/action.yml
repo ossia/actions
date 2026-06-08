@@ -1,0 +1,208 @@
+name: 'Build Avendish template plugin'
+description: >
+  Self-contained build for the celtera avendish-*-processor-template repos
+  (audio / video / geometry). Fetches its own toolchain and SDKs (no ossia SDK):
+  Boost, Max, TouchDesigner, and optionally CLAP / VST3; godot-cpp is fetched by
+  CMake. Builds every Avendish back-end the project's CMakeLists emits, packages
+  each as a zip, and uploads them. Run once per OS from the caller's matrix
+  (Linux clang / Windows clang-cl / macOS).
+
+inputs:
+  clap:
+    description: 'Fetch the CLAP SDK and build the CLAP back-end'
+    required: false
+    default: 'false'
+  vst3:
+    description: 'Fetch the VST3 SDK (built lean) and build the VST3 back-end'
+    required: false
+    default: 'false'
+  run-tests:
+    description: 'Run ctest after building (e.g. the Python-binding tests)'
+    required: false
+    default: 'false'
+  extra-cmake-args:
+    description: 'Extra CMake arguments appended to the configure step'
+    required: false
+    default: ''
+  llvm-version:
+    description: 'clang/lld version installed on Linux via apt.llvm.org'
+    required: false
+    default: '20'
+  windows-compiler:
+    description: 'Windows compiler: clang-cl (default) or cl (plain MSVC)'
+    required: false
+    default: 'clang-cl'
+  touchdesigner-ref:
+    description: 'Ref of jcelerier/CustomOperatorSamples to check out (TD SDK headers)'
+    required: false
+    default: 'add-pop-headers'
+  boost-url:
+    description: 'URL of a header-only Boost tarball (>= 1.87)'
+    required: false
+    default: 'https://github.com/ossia/score-sdk/releases/download/sdk31/boost_1_90_0.tar.gz'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout CLAP SDK
+      if: inputs.clap == 'true'
+      uses: actions/checkout@v4
+      with:
+        repository: free-audio/clap
+        path: clap-sdk
+
+    - name: Checkout VST3 SDK
+      if: inputs.vst3 == 'true'
+      uses: actions/checkout@v4
+      with:
+        repository: steinbergmedia/vst3sdk
+        submodules: 'recursive'
+        path: vst3sdk
+
+    - name: Checkout TouchDesigner SDK headers
+      uses: actions/checkout@v4
+      with:
+        repository: jcelerier/CustomOperatorSamples
+        ref: ${{ inputs.touchdesigner-ref }}
+        path: touchdesigner-sdk
+
+    - name: Checkout Max SDK
+      uses: actions/checkout@v4
+      with:
+        repository: jcelerier/max-sdk-base
+        submodules: 'recursive'
+        path: max-sdk-base
+
+    - name: Select Xcode 26 (macOS)
+      if: runner.os == 'macOS'
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: '26'
+
+    - name: Set up MSVC (Windows)
+      if: runner.os == 'Windows'
+      uses: ilammy/msvc-dev-cmd@v1
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install pybind11
+      shell: bash
+      run: python -m pip install --upgrade pip pybind11
+
+    - name: Install dependencies (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt update
+        curl -L https://apt.llvm.org/llvm.sh > llvm.sh
+        chmod +x ./llvm.sh
+        sudo ./llvm.sh ${{ inputs.llvm-version }}
+        sudo apt install -y ninja-build clang-${{ inputs.llvm-version }} lld-${{ inputs.llvm-version }}
+        sudo apt install -y libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libglib2.0-dev libjson-glib-dev libsoup2.4-dev || true
+
+    - name: Install dependencies (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: brew install ninja
+
+    - name: Install dependencies (Windows)
+      if: runner.os == 'Windows'
+      shell: bash
+      run: choco install -y ninja llvm
+
+    - name: Set up Boost
+      shell: bash
+      run: |
+        curl -fsSL "${{ inputs.boost-url }}" -o boost.tar.gz
+        mkdir -p boost/include
+        tar -xzf boost.tar.gz --strip-components=1 --directory boost/include
+
+    - name: Build
+      id: build
+      shell: bash
+      run: |
+        set -e
+        BUILD_DIR=build-release
+        INSTALL_DIR="$PWD/install"
+        mkdir -p "$INSTALL_DIR"
+        export VERBOSE=1
+
+        LLVM="${{ inputs.llvm-version }}"
+        case "$RUNNER_OS" in
+          Linux)
+            TRIPLE=linux-clang-x86_64
+            TOOLCHAIN=( -DCMAKE_C_COMPILER=clang-$LLVM -DCMAKE_CXX_COMPILER=clang++-$LLVM
+                        -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld-$LLVM
+                        -DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld-$LLVM
+                        -DCMAKE_MODULE_LINKER_FLAGS=-fuse-ld=lld-$LLVM ) ;;
+          Windows)
+            if [ "${{ inputs.windows-compiler }}" = "cl" ]; then
+              TRIPLE=windows-msvc-x86_64
+              TOOLCHAIN=()   # auto-detect cl from the MSVC env
+            else
+              TRIPLE=windows-clang-x86_64
+              TOOLCHAIN=( -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl )
+            fi ;;
+          macOS)
+            TRIPLE=macos-clang-aarch64
+            TOOLCHAIN=() ;;
+        esac
+        echo "triple=$TRIPLE" >> "$GITHUB_OUTPUT"
+
+        ARGS=( -DTOUCHDESIGNER_SDK_PATH="$PWD/touchdesigner-sdk"
+               -DAVND_MAXSDK_PATH="$PWD/max-sdk-base"
+               -DPython_EXECUTABLE="$(python -c 'import sys; print(sys.executable)')"
+               -Dpybind11_DIR="$(python -m pybind11 --cmakedir)"
+               -DBOOST_ROOT="$PWD/boost"
+               -DBoost_NO_BOOST_CMAKE=ON
+               -DCMAKE_POLICY_DEFAULT_CMP0167=OLD )
+
+        if [ "${{ inputs.clap }}" = "true" ]; then
+          ARGS+=( -DCMAKE_PREFIX_PATH="$PWD/clap-sdk" )
+        fi
+        if [ "${{ inputs.vst3 }}" = "true" ]; then
+          ARGS+=( -DVST3_SDK_ROOT="$PWD/vst3sdk"
+                  -DSMTG_ENABLE_VSTGUI_SUPPORT=OFF -DSMTG_ADD_VSTGUI=OFF
+                  -DSMTG_CREATE_PLUGIN_LINK=OFF -DSMTG_RUN_VST_VALIDATOR=OFF
+                  -DSMTG_ENABLE_VST3_PLUGIN_EXAMPLES=OFF
+                  -DSMTG_ENABLE_VST3_HOSTING_EXAMPLES=OFF )
+          # Xcode 26's SDK no longer transitively provides std::terminate to the VST3
+          # SDK's threadchecker_mac.mm.
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            ARGS+=( "-DCMAKE_CXX_FLAGS=-include exception" )
+          fi
+        fi
+
+        cmake -S "$PWD" -B "$BUILD_DIR" -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_BUILD_WITH_INSTALL_RPATH=1 \
+          "${ARGS[@]}" "${TOOLCHAIN[@]}" ${{ inputs.extra-cmake-args }}
+
+        cmake --build "$BUILD_DIR"
+
+        if [ "${{ inputs.run-tests }}" = "true" ]; then
+          ctest --test-dir "$BUILD_DIR" --output-on-failure
+        fi
+
+        shopt -s nullglob
+        for backend in clap vst3 vintage max td godot pd python standalone example gstreamer; do
+          [ -d "$BUILD_DIR/$backend" ] || continue
+          (
+            cd "$BUILD_DIR/$backend"
+            # -e (not -f): VST3 / macOS-Max bundles are directories; tar recurses into them.
+            for file in *; do
+              [ -e "$file" ] || continue
+              cmake -E tar cf "$INSTALL_DIR/$backend-$TRIPLE-$file.zip" --format=zip -- "$file"
+            done
+          )
+        done
+
+    - name: Archive production artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.build.outputs.triple }}
+        path: |
+          install/*
