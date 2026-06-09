@@ -1,0 +1,42 @@
+name: Score addon CI
+
+# One-line CI for an ossia score addon. Runs the four reusable workflows
+# `score-addon-puara` and other addons already chain together (dev / sdk /
+# jit builds, plus the tag-gated release upload), so that adopting the
+# full puara-style pipeline costs a single `uses:` entry in the addon's
+# own workflow.
+#
+# Caller workflow (`.github/workflows/builds.yaml` in the addon repo):
+#
+#   name: Build
+#   on:
+#     pull_request:
+#     push:
+#       branches: [master, main, dev, develop]
+#       tags: ['v*']
+#
+#   concurrency:
+#     group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+#     cancel-in-progress: true
+#
+#   jobs:
+#     ci:
+#       uses: ossia/actions/.github/workflows/score-addon.yml@master
+#       secrets: inherit
+
+on:
+  workflow_call:
+
+jobs:
+  dev:
+    uses: ossia/actions/.github/workflows/builds-dev.yml@master
+    secrets: inherit
+  sdk:
+    uses: ossia/actions/.github/workflows/builds-sdk.yml@master
+    secrets: inherit
+  jit:
+    uses: ossia/actions/.github/workflows/jit.yml@master
+    secrets: inherit
+  release:
+    uses: ossia/actions/.github/workflows/release.yml@master
+    secrets: inherit
