@@ -1,10 +1,11 @@
 name: Score addon CI
 
-# One-line CI for an ossia score addon. Runs the four reusable workflows
-# `score-addon-puara` and other addons already chain together (dev / sdk /
-# jit builds, plus the tag-gated release upload), so that adopting the
-# full puara-style pipeline costs a single `uses:` entry in the addon's
-# own workflow.
+# One-line CI for an ossia score addon. Bundles the four reusable
+# workflows score-addon-puara and other addons chain together (dev /
+# sdk / jit builds + tag-gated release upload), so adopting the full
+# puara-style pipeline costs a single `uses:` entry. Each of the four
+# tracks defaults to `true` and can be turned off per addon via the
+# matching boolean input.
 #
 # Caller workflow (`.github/workflows/builds.yaml` in the addon repo):
 #
@@ -23,20 +24,48 @@ name: Score addon CI
 #     ci:
 #       uses: ossia/actions/.github/workflows/score-addon.yml@master
 #       secrets: inherit
+#       # with:
+#       #   jit: false      # opt out of one track
+#       #   release: false
 
 on:
   workflow_call:
+    inputs:
+      dev:
+        description: 'Run the dev build (score dev tree)'
+        required: false
+        default: true
+        type: boolean
+      sdk:
+        description: 'Run the SDK build (latest + continuous score SDK)'
+        required: false
+        default: true
+        type: boolean
+      jit:
+        description: 'Run the JIT build (score runtime-loadable artifact)'
+        required: false
+        default: true
+        type: boolean
+      release:
+        description: 'Run the release job (./release.sh + tag-gated upload)'
+        required: false
+        default: true
+        type: boolean
 
 jobs:
   dev:
+    if: inputs.dev
     uses: ossia/actions/.github/workflows/builds-dev.yml@master
     secrets: inherit
   sdk:
+    if: inputs.sdk
     uses: ossia/actions/.github/workflows/builds-sdk.yml@master
     secrets: inherit
   jit:
+    if: inputs.jit
     uses: ossia/actions/.github/workflows/jit.yml@master
     secrets: inherit
   release:
+    if: inputs.release
     uses: ossia/actions/.github/workflows/release.yml@master
     secrets: inherit
