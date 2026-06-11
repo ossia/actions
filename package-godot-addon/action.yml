@@ -1,0 +1,334 @@
+name: 'Package avendish Godot Addon'
+description: 'Collects an avendish-built Godot GDExtension addon (one .gdextension config + binary per port), rewrites library paths to the per-OS/arch bin layout, signs on macOS/Windows when secrets are provided, and zips into a distributable archive.'
+inputs:
+  addon-name:
+    description: 'Name of the addon (used as Godot addon folder and zip prefix)'
+    required: true
+  addon-path:
+    description: 'Path to addon source root (LICENSE / README live here)'
+    required: false
+    default: '.'
+  build-dir:
+    description: 'Directory where avendish wrote the per-backend output (GDExtensions expected under <build-dir>/godot/)'
+    required: false
+    default: 'build'
+  output-dir:
+    description: 'Directory where the packaged zip will be written'
+    required: false
+    default: 'package'
+  os-tag:
+    description: 'OS tag used in artifact name: linux | macos | windows'
+    required: true
+  arch-tag:
+    description: 'Architecture tag used in artifact name: x86_64 | arm64'
+    required: true
+  macos-certificate-base64:
+    description: 'Base64-encoded P12 certificate for macOS code signing (optional)'
+    required: false
+    default: ''
+  macos-certificate-password:
+    description: 'Password for macOS P12 certificate (optional)'
+    required: false
+    default: ''
+  macos-notarize-team-id:
+    description: 'Apple Developer Team ID for notarization (optional)'
+    required: false
+    default: ''
+  macos-notarize-apple-id:
+    description: 'Apple ID for notarization (optional)'
+    required: false
+    default: ''
+  macos-notarize-password:
+    description: 'App-specific password for notarization (optional)'
+    required: false
+    default: ''
+  windows-certificate-base64:
+    description: 'Base64-encoded PFX certificate for Windows code signing (optional)'
+    required: false
+    default: ''
+  windows-certificate-password:
+    description: 'Password for Windows PFX certificate (optional)'
+    required: false
+    default: ''
+
+outputs:
+  zip-path:
+    description: 'Absolute path to the produced zip file'
+    value: ${{ steps.zip.outputs.zip-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Import code signing certificate (macOS)
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != ''
+      uses: jcelerier/import-codesign-certs@master
+      with:
+        p12-file-base64: ${{ inputs.macos-certificate-base64 }}
+        p12-password: ${{ inputs.macos-certificate-password }}
+
+    - name: Prepare paths
+      id: paths
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "${{ inputs.output-dir }}"
+        OUTPUT_DIR="$(cd "${{ inputs.output-dir }}" && pwd)"
+        PKG_DIR="$OUTPUT_DIR/${{ inputs.addon-name }}"
+        BIN_SUBDIR="bin/${{ inputs.os-tag }}-${{ inputs.arch-tag }}"
+        BIN_DIR="$PKG_DIR/$BIN_SUBDIR"
+        rm -rf "$PKG_DIR"
+        mkdir -p "$BIN_DIR"
+        ZIP_NAME="${{ inputs.addon-name }}-godot-${{ inputs.os-tag }}-${{ inputs.arch-tag }}.zip"
+        ZIP_PATH="$OUTPUT_DIR/$ZIP_NAME"
+        echo "GD_OUTPUT_DIR=$OUTPUT_DIR" >> "$GITHUB_ENV"
+        echo "GD_PKG_DIR=$PKG_DIR" >> "$GITHUB_ENV"
+        echo "GD_BIN_SUBDIR=$BIN_SUBDIR" >> "$GITHUB_ENV"
+        echo "GD_BIN_DIR=$BIN_DIR" >> "$GITHUB_ENV"
+        echo "GD_ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+        echo "GD_ZIP_PATH=$ZIP_PATH" >> "$GITHUB_ENV"
+
+    - name: Collect .gdextension configs and binaries
+      shell: bash
+      run: |
+        set -euo pipefail
+        GD_SRC="${{ inputs.build-dir }}/godot"
+        if [[ ! -d "$GD_SRC" ]]; then
+          echo "Error: Godot build output directory '$GD_SRC' does not exist"
+          ls -la "${{ inputs.build-dir }}" || true
+          exit 1
+        fi
+
+        echo "Looking for Godot artifacts in $GD_SRC:"
+        ls -la "$GD_SRC" || true
+
+        # 1. Copy every .gdextension config to the addon root.
+        CFG_COUNT=0
+        while IFS= read -r -d '' cfg; do
+          echo "Copying gdextension config: $cfg"
+          cp -f "$cfg" "$GD_PKG_DIR/"
+          CFG_COUNT=$((CFG_COUNT + 1))
+        done < <(find "$GD_SRC" -maxdepth 2 -type f -name '*.gdextension' -print0)
+
+        if [[ "$CFG_COUNT" -eq 0 ]]; then
+          echo "Error: no .gdextension config files found under '$GD_SRC'"
+          exit 1
+        fi
+
+        # 2. Copy every binary (loose .so / .dylib / .dll) into bin/<os>-<arch>/.
+        BIN_COUNT=0
+        while IFS= read -r -d '' bin; do
+          echo "Copying binary: $bin -> $GD_BIN_DIR/"
+          cp -f "$bin" "$GD_BIN_DIR/"
+          BIN_COUNT=$((BIN_COUNT + 1))
+        done < <(find "$GD_SRC" -maxdepth 2 -type f \( -name '*.so' -o -name '*.dylib' -o -name '*.dll' \) -print0)
+
+        if [[ "$BIN_COUNT" -eq 0 ]]; then
+          echo "Error: no Godot binaries (.so/.dylib/.dll) found under '$GD_SRC'"
+          exit 1
+        fi
+        echo "Collected $CFG_COUNT gdextension config(s) and $BIN_COUNT binary/binaries."
+
+    - name: Rewrite library paths in .gdextension configs
+      shell: bash
+      run: |
+        set -euo pipefail
+        # avendish emits a [libraries] section keyed by <os>.{debug,release}[.<arch>]:
+        #   linux.debug.x86_64    = "res://bin/<c_name><suffix>.so"
+        #   linux.release.x86_64  = "res://bin/<c_name><suffix>.so"
+        #   windows.debug.x86_64  = "res://bin/<c_name><suffix>.dll"
+        #   windows.release.x86_64 = "res://bin/<c_name><suffix>.dll"
+        #   macos.debug           = "res://bin/<c_name><suffix>.dylib"   # no arch
+        #   macos.release         = "res://bin/<c_name><suffix>.dylib"
+        # We rewrite the RHS to point into the addon's per-OS/arch bin/ layout:
+        #   res://addons/<addon-name>/bin/<os>-<arch>/<basename>
+        # so per-OS zips can be unioned into a single addons/<addon-name>/ directory.
+        # macOS has no arch suffix in the key — avendish currently builds arm64-only
+        # macOS in the CI matrix, so we map both macos.{debug,release} → macos-arm64.
+
+        ADDON_NAME='${{ inputs.addon-name }}'
+
+        shopt -s nullglob
+        for cfg in "$GD_PKG_DIR"/*.gdextension; do
+          echo "Rewriting library paths in: $cfg"
+          python3 - "$cfg" "$ADDON_NAME" <<'PYEOF'
+        import re, sys, pathlib
+        path, addon = sys.argv[1:3]
+        p = pathlib.Path(path)
+        text = p.read_text()
+        # Capture: indent, os, build, optional arch, ' = "', tail-basename, trailing-quote
+        KEY_RE = re.compile(
+            r'^(?P<indent>\s*)'
+            r'(?P<os>linux|macos|windows)'
+            r'\.(?P<build>debug|release)'
+            r'(?:\.(?P<arch>x86_64|arm64))?'
+            r'(?P<lhs>\s*=\s*")'
+            r'res://[^"]*/(?P<basename>[^/"]+)'
+            r'(?P<rhs>"\s*)$',
+            re.MULTILINE,
+        )
+        def _sub(m):
+            indent  = m.group('indent')
+            os_     = m.group('os')
+            build   = m.group('build')
+            arch    = m.group('arch')
+            lhs     = m.group('lhs')
+            base    = m.group('basename')
+            rhs     = m.group('rhs')
+            # macOS keys have no arch — avendish currently CI-builds macos-arm64 only.
+            arch_seg = arch if arch else ('arm64' if os_ == 'macos' else 'x86_64')
+            arch_key = f'.{arch}' if arch else ''
+            new_path = f'res://addons/{addon}/bin/{os_}-{arch_seg}/{base}'
+            return f'{indent}{os_}.{build}{arch_key}{lhs}{new_path}{rhs}'
+        new_text, n = KEY_RE.subn(_sub, text)
+        if n:
+            p.write_text(new_text)
+        print(f'  rewrote {n} library entry/entries in {path}')
+        PYEOF
+          echo "----- $cfg after rewrite -----"
+          cat "$cfg"
+          echo "------------------------------"
+        done
+
+    - name: Sign Godot binaries (macOS)
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        IDENTITY="ossia.io"
+
+        shopt -s nullglob
+        for dylib in "$GD_BIN_DIR"/*.dylib; do
+          echo "Codesigning $dylib"
+          codesign --deep --force --options runtime --timestamp \
+            --sign "$IDENTITY" "$dylib"
+          codesign --verify --verbose=2 "$dylib" || true
+        done
+
+    - name: Notarize Godot binaries (macOS, best-effort)
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != '' && inputs.macos-notarize-team-id != '' && inputs.macos-notarize-apple-id != '' && inputs.macos-notarize-password != ''
+      shell: bash
+      run: |
+        # Loose .dylib files cannot be stapled (stapler requires a bundle/dmg/pkg),
+        # but submitting the zipped bin dir runs Apple's online check against the signature.
+        set +e
+        TEAM_ID="${{ inputs.macos-notarize-team-id }}"
+        APPLE_ID="${{ inputs.macos-notarize-apple-id }}"
+        APP_PWD="${{ inputs.macos-notarize-password }}"
+
+        TMPZIP="$(mktemp -u).zip"
+        ( cd "$GD_BIN_DIR" && ditto -c -k --keepParent . "$TMPZIP" )
+
+        echo "Submitting $TMPZIP for notarization (best-effort)"
+        xcrun notarytool submit "$TMPZIP" \
+          --team-id "$TEAM_ID" \
+          --apple-id "$APPLE_ID" \
+          --password "$APP_PWD" \
+          --wait || echo "warning: notarization submission failed; continuing with signed-only artifacts"
+
+        rm -f "$TMPZIP"
+
+    - name: Sign Godot binaries (Windows)
+      if: runner.os == 'Windows' && inputs.windows-certificate-base64 != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        PFX_FILE="$(mktemp -u).pfx"
+        echo "${{ inputs.windows-certificate-base64 }}" | base64 -d > "$PFX_FILE"
+
+        SIGNTOOL=""
+        for candidate in \
+            "/c/Program Files (x86)/Windows Kits/10/bin/x64/signtool.exe" \
+            "/c/Program Files (x86)/Windows Kits/10/App Certification Kit/signtool.exe"; do
+          if [[ -e "$candidate" ]]; then
+            SIGNTOOL="$candidate"
+            break
+          fi
+        done
+        if [[ -z "$SIGNTOOL" ]]; then
+          SIGNTOOL=$(find "/c/Program Files (x86)/Windows Kits/10/bin" -name 'signtool.exe' -path '*x64*' 2>/dev/null | sort -r | head -1)
+        fi
+        if [[ -z "$SIGNTOOL" || ! -e "$SIGNTOOL" ]]; then
+          echo "Error: signtool.exe not found"
+          rm -f "$PFX_FILE"
+          exit 1
+        fi
+        echo "Using signtool: $SIGNTOOL"
+
+        PWD_ARG='${{ inputs.windows-certificate-password }}'
+
+        shopt -s nullglob
+        for dll in "$GD_BIN_DIR"/*.dll; do
+          echo "Signing $dll"
+          "$SIGNTOOL" sign //f "$PFX_FILE" //p "$PWD_ARG" \
+            //tr http://timestamp.digicert.com //td sha256 //fd sha256 \
+            "$dll"
+        done
+
+        rm -f "$PFX_FILE"
+
+    - name: Write README.txt explaining per-OS union model
+      shell: bash
+      run: |
+        set -euo pipefail
+        cat > "$GD_PKG_DIR/README.txt" <<EOF
+        ${{ inputs.addon-name }} — Godot GDExtension addon (avendish build)
+        ====================================================================
+
+        Layout
+        ------
+          ${{ inputs.addon-name }}/
+            <port>.gdextension         # one config per avendish port
+            bin/
+              ${{ inputs.os-tag }}-${{ inputs.arch-tag }}/
+                <port>.{so,dylib,dll}  # binaries for THIS os/arch only
+
+        Per-OS zip
+        ----------
+        This zip contains only the binaries built for ${{ inputs.os-tag }}-${{ inputs.arch-tag }}.
+        The .gdextension config files already reference every supported platform via
+        res:// paths under bin/<os>-<arch>/, so to ship a fully cross-platform addon:
+
+          1. Unzip this archive into your Godot project's "addons/" directory.
+          2. Unzip the matching per-OS zips for any other platforms you need
+             into the SAME "addons/" directory — the bin/<os>-<arch>/ folders
+             will sit side-by-side and Godot will pick the right one at load time.
+
+        EOF
+
+    - name: Copy LICENSE/README
+      shell: bash
+      run: |
+        set -euo pipefail
+        for f in LICENSE LICENSE.txt LICENSE.md README README.md; do
+          SRC="${{ inputs.addon-path }}/$f"
+          if [[ -f "$SRC" ]]; then
+            echo "Copying $SRC"
+            cp -f "$SRC" "$GD_PKG_DIR/"
+          fi
+        done
+
+    - name: Display package contents
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "Package tree for $GD_PKG_DIR:"
+        find "$GD_PKG_DIR" -print
+
+    - name: Create zip
+      id: zip
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd "$GD_OUTPUT_DIR"
+        rm -f "$GD_ZIP_PATH"
+        if command -v zip >/dev/null 2>&1; then
+          zip -r "$GD_ZIP_NAME" "${{ inputs.addon-name }}"
+        elif command -v 7z >/dev/null 2>&1; then
+          7z a -tzip "$GD_ZIP_NAME" "${{ inputs.addon-name }}"
+        else
+          powershell -NoProfile -Command "Compress-Archive -Path '${{ inputs.addon-name }}' -DestinationPath '$GD_ZIP_NAME' -Force"
+        fi
+        echo "Created zip: $GD_ZIP_PATH"
+        ls -la "$GD_ZIP_PATH"
+        echo "zip-path=$GD_ZIP_PATH" >> "$GITHUB_OUTPUT"

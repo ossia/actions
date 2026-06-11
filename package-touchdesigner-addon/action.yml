@@ -1,0 +1,248 @@
+name: 'Package avendish TouchDesigner Addon'
+description: 'Packages an avendish-built TouchDesigner CHOP/TOP/SOP/DAT plugin (.plugin on macOS, .dll on Windows), signs/notarizes when secrets are set, and zips it.'
+inputs:
+  addon-name:
+    description: 'Name of the addon (used as folder & zip prefix)'
+    required: true
+  addon-path:
+    description: 'Path to addon source root (LICENSE/README live here)'
+    required: false
+    default: '.'
+  build-dir:
+    description: 'Directory where avendish wrote the per-backend output (TouchDesigner plugins expected under <build-dir>/td/)'
+    required: false
+    default: 'build'
+  output-dir:
+    description: 'Directory where the packaged zip will be written'
+    required: false
+    default: 'package'
+  os-tag:
+    description: 'OS tag used in artifact name: linux | macos | windows'
+    required: true
+  arch-tag:
+    description: 'Architecture tag used in artifact name: x86_64 | arm64'
+    required: true
+  macos-certificate-base64:
+    description: 'Base64-encoded P12 certificate for macOS code signing (optional)'
+    required: false
+    default: ''
+  macos-certificate-password:
+    description: 'Password for macOS P12 certificate (optional)'
+    required: false
+    default: ''
+  macos-notarize-team-id:
+    description: 'Apple Developer Team ID for notarization (optional)'
+    required: false
+    default: ''
+  macos-notarize-apple-id:
+    description: 'Apple ID for notarization (optional)'
+    required: false
+    default: ''
+  macos-notarize-password:
+    description: 'App-specific password for notarization (optional)'
+    required: false
+    default: ''
+  windows-certificate-base64:
+    description: 'Base64-encoded PFX certificate for Windows code signing (optional)'
+    required: false
+    default: ''
+  windows-certificate-password:
+    description: 'Password for Windows PFX certificate (optional)'
+    required: false
+    default: ''
+
+outputs:
+  zip-path:
+    description: 'Absolute path to the produced zip file'
+    value: ${{ steps.zip.outputs.zip-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Prepare paths
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "${{ inputs.output-dir }}"
+        OUTPUT_DIR="$(cd "${{ inputs.output-dir }}" && pwd)"
+        PKG_DIR="$OUTPUT_DIR/${{ inputs.addon-name }}"
+        rm -rf "$PKG_DIR"
+        mkdir -p "$PKG_DIR/Plugins"
+        ZIP_NAME="${{ inputs.addon-name }}-touchdesigner-${{ inputs.os-tag }}-${{ inputs.arch-tag }}.zip"
+        ZIP_PATH="$OUTPUT_DIR/$ZIP_NAME"
+        echo "OUTPUT_DIR=$OUTPUT_DIR" >> "$GITHUB_ENV"
+        echo "PKG_DIR=$PKG_DIR" >> "$GITHUB_ENV"
+        echo "PLUGINS_DIR=$PKG_DIR/Plugins" >> "$GITHUB_ENV"
+        echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+        echo "ZIP_PATH=$ZIP_PATH" >> "$GITHUB_ENV"
+
+    - name: Collect TouchDesigner plugins
+      shell: bash
+      run: |
+        set -euo pipefail
+        TD_DIR="${{ inputs.build-dir }}/td"
+        if [[ ! -d "$TD_DIR" ]]; then
+          echo "Error: TouchDesigner build output directory '$TD_DIR' does not exist"
+          exit 1
+        fi
+
+        FOUND=0
+        case "${{ inputs.os-tag }}" in
+          macos)
+            # avendish emits a flat .dylib (<TARGET>_<PROCESSOR_TYPE>_td.dylib), not a .plugin bundle.
+            # TouchDesigner accepts loose .dylib files under the addon's Plugins/ folder.
+            # TODO: avendish should emit a .plugin bundle on macOS for proper TD integration.
+            while IFS= read -r -d '' f; do
+              echo "Copying TD plugin dylib: $f"
+              cp -f "$f" "$PLUGINS_DIR/"
+              FOUND=$((FOUND + 1))
+            done < <(find "$TD_DIR" -maxdepth 2 -type f -name '*.dylib' -print0)
+            ;;
+          windows)
+            while IFS= read -r -d '' f; do
+              echo "Copying TD plugin: $f"
+              cp -f "$f" "$PLUGINS_DIR/"
+              FOUND=$((FOUND + 1))
+            done < <(find "$TD_DIR" -maxdepth 2 -type f -name '*.dll' -print0)
+            ;;
+          linux)
+            # TouchDesigner has no Linux runtime — ship what's there as best-effort.
+            while IFS= read -r -d '' f; do
+              echo "Copying TD plugin (linux best-effort): $f"
+              cp -f "$f" "$PLUGINS_DIR/"
+              FOUND=$((FOUND + 1))
+            done < <(find "$TD_DIR" -maxdepth 2 -type f \( -name '*.so' -o -name '*.dylib' \) -print0)
+            ;;
+          *)
+            echo "Error: unsupported os-tag '${{ inputs.os-tag }}'"
+            exit 1
+            ;;
+        esac
+
+        if [[ "$FOUND" -eq 0 ]]; then
+          echo "Error: no TouchDesigner plugins found under '$TD_DIR' for os-tag=${{ inputs.os-tag }}"
+          exit 1
+        fi
+        echo "Collected $FOUND TouchDesigner plugin(s)."
+
+    - name: Copy LICENSE/README
+      shell: bash
+      run: |
+        set -euo pipefail
+        for f in LICENSE LICENSE.txt LICENSE.md README README.md README.txt; do
+          SRC="${{ inputs.addon-path }}/$f"
+          if [[ -f "$SRC" ]]; then
+            echo "Copying $SRC"
+            cp -f "$SRC" "$PKG_DIR/"
+          fi
+        done
+
+    # --- macOS signing & notarization (inline pattern) ---
+    - name: Import macOS code signing certificate
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != ''
+      uses: jcelerier/import-codesign-certs@master
+      with:
+        p12-file-base64: ${{ inputs.macos-certificate-base64 }}
+        p12-password: ${{ inputs.macos-certificate-password }}
+
+    - name: Sign TD plugin dylibs (macOS)
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        shopt -s nullglob
+        DYLIBS=( "$PLUGINS_DIR"/*.dylib )
+        if [[ ${#DYLIBS[@]} -eq 0 ]]; then
+          echo "Nothing to sign in $PLUGINS_DIR"
+          exit 0
+        fi
+        for target in "${DYLIBS[@]}"; do
+          [[ -e "$target" ]] || continue
+          echo "Signing $target"
+          codesign --force --options runtime --timestamp --sign "ossia.io" "$target"
+          codesign --verify --verbose "$target" || true
+        done
+
+    - name: Notarize TD plugin dylibs (macOS, best-effort)
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != '' && inputs.macos-notarize-team-id != '' && inputs.macos-notarize-apple-id != '' && inputs.macos-notarize-password != ''
+      shell: bash
+      run: |
+        # Loose .dylib files cannot be stapled (stapler requires a bundle/dmg/pkg).
+        # Submit the zipped Plugins dir so Apple validates the signatures; failures
+        # are non-fatal because TouchDesigner loads signed-but-unstapled dylibs fine.
+        set +e
+        shopt -s nullglob
+        DYLIBS=( "$PLUGINS_DIR"/*.dylib )
+        if [[ ${#DYLIBS[@]} -eq 0 ]]; then
+          echo "No targets to notarize."
+          exit 0
+        fi
+        TMPZIP="$(mktemp -u).zip"
+        ( cd "$PLUGINS_DIR" && ditto -c -k --keepParent . "$TMPZIP" )
+        echo "Submitting $TMPZIP to notarytool (best-effort)"
+        xcrun notarytool submit "$TMPZIP" \
+          --team-id "${{ inputs.macos-notarize-team-id }}" \
+          --apple-id "${{ inputs.macos-notarize-apple-id }}" \
+          --password "${{ inputs.macos-notarize-password }}" \
+          --wait || echo "warning: notarization submission failed; continuing with signed-only artifacts"
+        rm -f "$TMPZIP"
+
+    # --- Windows signing (inline pattern) ---
+    - name: Sign Windows .dll plugins
+      if: runner.os == 'Windows' && inputs.windows-certificate-base64 != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        PFX="$RUNNER_TEMP/win-codesign.pfx"
+        echo "${{ inputs.windows-certificate-base64 }}" | base64 -d > "$PFX"
+
+        SIGNTOOL=""
+        if command -v signtool >/dev/null 2>&1; then
+          SIGNTOOL="signtool"
+        else
+          CANDIDATE=$(find "/c/Program Files (x86)/Windows Kits/10/bin" -name signtool.exe 2>/dev/null | grep '/x64/' | sort -r | head -n1 || true)
+          if [[ -z "$CANDIDATE" ]]; then
+            CANDIDATE=$(find "/c/Program Files (x86)/Windows Kits/10/bin" -name signtool.exe 2>/dev/null | sort -r | head -n1 || true)
+          fi
+          if [[ -n "$CANDIDATE" ]]; then
+            SIGNTOOL="$CANDIDATE"
+          fi
+        fi
+        if [[ -z "$SIGNTOOL" ]]; then
+          echo "Error: signtool not found"
+          exit 1
+        fi
+        echo "Using signtool: $SIGNTOOL"
+
+        shopt -s nullglob
+        for f in "$PLUGINS_DIR"/*.dll; do
+          echo "Signing $f"
+          "$SIGNTOOL" sign /f "$PFX" /p "${{ inputs.windows-certificate-password }}" \
+            /tr http://timestamp.digicert.com /td sha256 /fd sha256 "$f"
+        done
+        rm -f "$PFX"
+
+    - name: Display package contents
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "Package layout for $PKG_DIR:"
+        find "$PKG_DIR" -maxdepth 3 -mindepth 1 -print
+
+    - name: Create zip
+      id: zip
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd "$OUTPUT_DIR"
+        rm -f "$ZIP_PATH"
+        if command -v zip >/dev/null 2>&1; then
+          # -y preserves symlinks (matters for .plugin bundles on macOS)
+          zip -ry "$ZIP_NAME" "${{ inputs.addon-name }}"
+        elif command -v 7z >/dev/null 2>&1; then
+          7z a -tzip "$ZIP_NAME" "${{ inputs.addon-name }}"
+        else
+          powershell -NoProfile -Command "Compress-Archive -Path '${{ inputs.addon-name }}' -DestinationPath '$ZIP_NAME' -Force"
+        fi
+        echo "Created zip: $ZIP_PATH"
+        echo "zip-path=$ZIP_PATH" >> "$GITHUB_OUTPUT"

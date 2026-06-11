@@ -1,0 +1,244 @@
+name: 'Package CLAP Avendish Addon'
+description: 'Collects CLAP plugins from an avendish build, signs/notarizes on macOS and Windows, and zips into a distributable archive'
+inputs:
+  addon-name:
+    description: 'Name of the addon (used in the resulting zip name)'
+    required: true
+  addon-path:
+    description: 'Path to addon source root (where LICENSE / README live)'
+    required: false
+    default: '.'
+  build-dir:
+    description: 'Build directory containing the avendish output tree (clap subdir)'
+    required: false
+    default: 'build'
+  output-dir:
+    description: 'Directory in which to write the zip'
+    required: false
+    default: 'package'
+  os-tag:
+    description: 'OS tag used in the zip name: linux | macos | windows'
+    required: true
+  arch-tag:
+    description: 'Architecture tag used in the zip name: x86_64 | arm64'
+    required: true
+  macos-certificate-base64:
+    description: 'Base64-encoded P12 certificate for macOS code signing (optional)'
+    required: false
+    default: ''
+  macos-certificate-password:
+    description: 'Password for macOS P12 certificate (optional)'
+    required: false
+    default: ''
+  macos-notarize-team-id:
+    description: 'Apple Developer Team ID for notarization (optional)'
+    required: false
+    default: ''
+  macos-notarize-apple-id:
+    description: 'Apple ID for notarization (optional)'
+    required: false
+    default: ''
+  macos-notarize-password:
+    description: 'App-specific password for notarization (optional)'
+    required: false
+    default: ''
+  windows-certificate-base64:
+    description: 'Base64-encoded PFX certificate for Windows code signing (optional)'
+    required: false
+    default: ''
+  windows-certificate-password:
+    description: 'Password for Windows PFX certificate (optional)'
+    required: false
+    default: ''
+
+outputs:
+  zip-path:
+    description: 'Absolute path to the generated zip'
+    value: ${{ steps.zip.outputs.zip-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Import code signing certificate (macOS)
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != ''
+      uses: jcelerier/import-codesign-certs@master
+      with:
+        p12-file-base64: ${{ inputs.macos-certificate-base64 }}
+        p12-password: ${{ inputs.macos-certificate-password }}
+
+    - name: Prepare staging directory
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "${{ inputs.output-dir }}/staging"
+        OUT_ABS=$(cd "${{ inputs.output-dir }}" && pwd)
+        echo "CLAP_OUTPUT_ABS=$OUT_ABS" >> $GITHUB_ENV
+        echo "CLAP_STAGING_ABS=$OUT_ABS/staging" >> $GITHUB_ENV
+
+    - name: Collect CLAP plugins
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        BUILD_CLAP_DIR="${{ inputs.build-dir }}/clap"
+        if [[ ! -d "$BUILD_CLAP_DIR" ]]; then
+          echo "No CLAP build directory found at $BUILD_CLAP_DIR"
+          ls -la "${{ inputs.build-dir }}" || true
+          exit 1
+        fi
+
+        echo "Looking for CLAP plugins in $BUILD_CLAP_DIR:"
+        ls -la "$BUILD_CLAP_DIR"
+
+        # Post-patch avendish output: bundle directory on macOS, flat file on Linux/Windows.
+        # Either way -name '*.clap' matches; cp -R handles both.
+        FOUND=0
+        while IFS= read -r -d '' plugin; do
+          echo "Copying CLAP plugin: $plugin"
+          cp -R "$plugin" "$CLAP_STAGING_ABS/"
+          FOUND=$((FOUND + 1))
+        done < <(find "$BUILD_CLAP_DIR" -maxdepth 1 -name '*.clap' -print0)
+
+        if [[ $FOUND -eq 0 ]]; then
+          echo "Error: no .clap plugins found in $BUILD_CLAP_DIR"
+          exit 1
+        fi
+
+        echo "Staged CLAP plugins:"
+        ls -la "$CLAP_STAGING_ABS"
+
+    - name: Sign CLAP plugins (macOS)
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        IDENTITY="ossia.io"
+
+        # Post-patch avendish output: macOS CLAPs are always bundle directories.
+        for bundle in "$CLAP_STAGING_ABS"/*.clap; do
+          if [[ ! -d "$bundle" ]]; then
+            continue
+          fi
+          echo "Codesigning $bundle"
+          codesign --deep --force --options runtime --timestamp \
+            --sign "$IDENTITY" "$bundle"
+          codesign --verify --verbose=2 "$bundle" || true
+        done
+
+    - name: Notarize CLAP plugins (macOS)
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != '' && inputs.macos-notarize-team-id != '' && inputs.macos-notarize-apple-id != '' && inputs.macos-notarize-password != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        TEAM_ID="${{ inputs.macos-notarize-team-id }}"
+        APPLE_ID="${{ inputs.macos-notarize-apple-id }}"
+        APP_PWD="${{ inputs.macos-notarize-password }}"
+
+        # Post-patch avendish output: every .clap on macOS is a bundle directory,
+        # which means stapling is supported.
+        for bundle in "$CLAP_STAGING_ABS"/*.clap; do
+          if [[ ! -d "$bundle" ]]; then
+            continue
+          fi
+          echo "Notarizing $bundle"
+
+          tmpzip="${bundle}.notarize.zip"
+          ditto -c -k --keepParent "$bundle" "$tmpzip"
+
+          xcrun notarytool submit "$tmpzip" \
+            --team-id "$TEAM_ID" \
+            --apple-id "$APPLE_ID" \
+            --password "$APP_PWD" \
+            --wait
+
+          rm -f "$tmpzip"
+
+          echo "Stapling $bundle"
+          xcrun stapler staple "$bundle"
+          xcrun stapler validate "$bundle" || true
+        done
+
+    - name: Sign CLAP plugins (Windows)
+      if: runner.os == 'Windows' && inputs.windows-certificate-base64 != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        PFX_FILE="$(mktemp -u).pfx"
+        echo "${{ inputs.windows-certificate-base64 }}" | base64 -d > "$PFX_FILE"
+
+        SIGNTOOL=""
+        for candidate in \
+            "/c/Program Files (x86)/Windows Kits/10/bin/x64/signtool.exe" \
+            "/c/Program Files (x86)/Windows Kits/10/App Certification Kit/signtool.exe"; do
+          if [[ -e "$candidate" ]]; then
+            SIGNTOOL="$candidate"
+            break
+          fi
+        done
+        if [[ -z "$SIGNTOOL" ]]; then
+          SIGNTOOL=$(find "/c/Program Files (x86)/Windows Kits/10/bin" -name 'signtool.exe' -path '*x64*' 2>/dev/null | sort -r | head -1)
+        fi
+        if [[ -z "$SIGNTOOL" || ! -e "$SIGNTOOL" ]]; then
+          echo "Error: signtool.exe not found"
+          rm -f "$PFX_FILE"
+          exit 1
+        fi
+        echo "Using signtool: $SIGNTOOL"
+
+        PWD_ARG='${{ inputs.windows-certificate-password }}'
+
+        for plugin in "$CLAP_STAGING_ABS"/*.clap; do
+          if [[ ! -e "$plugin" ]]; then
+            continue
+          fi
+          # CLAP on Windows is a renamed DLL — flat file
+          echo "Signing $plugin"
+          "$SIGNTOOL" sign //f "$PFX_FILE" //p "$PWD_ARG" \
+            //tr http://timestamp.digicert.com //td sha256 //fd sha256 \
+            "$plugin"
+        done
+
+        rm -f "$PFX_FILE"
+
+    - name: Add metadata
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        cat > "$CLAP_STAGING_ABS/README.txt" <<'EOF'
+        Drop *.clap into your CLAP plugin folder.
+        EOF
+
+        if [[ -f "${{ inputs.addon-path }}/LICENSE" ]]; then
+          cp -f "${{ inputs.addon-path }}/LICENSE" "$CLAP_STAGING_ABS/"
+        elif [[ -f "${{ inputs.addon-path }}/LICENSE.txt" ]]; then
+          cp -f "${{ inputs.addon-path }}/LICENSE.txt" "$CLAP_STAGING_ABS/"
+        fi
+
+    - name: Create zip
+      id: zip
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        ZIP_NAME="${{ inputs.addon-name }}-clap-${{ inputs.os-tag }}-${{ inputs.arch-tag }}.zip"
+        ZIP_PATH="$CLAP_OUTPUT_ABS/$ZIP_NAME"
+        rm -f "$ZIP_PATH"
+
+        cd "$CLAP_STAGING_ABS"
+
+        if command -v zip >/dev/null 2>&1; then
+          zip -r "$ZIP_PATH" .
+        elif command -v 7z >/dev/null 2>&1; then
+          7z a "$ZIP_PATH" .
+        else
+          echo "Error: neither zip nor 7z is available"
+          exit 1
+        fi
+
+        echo "zip-path=$ZIP_PATH" >> $GITHUB_OUTPUT
+        echo "Created: $ZIP_PATH"
+        ls -la "$ZIP_PATH"
