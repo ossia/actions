@@ -1,0 +1,183 @@
+name: 'Package avendish WebAssembly Addon'
+description: 'Collects an avendish-built wasm addon (one .wasm + emscripten .js glue + demo .html per port), generates a landing index.html, and zips into a distributable static-site directory.'
+inputs:
+  addon-name:
+    description: 'Name of the addon (used as folder & zip prefix)'
+    required: true
+  addon-path:
+    description: 'Path to addon source root (LICENSE / README live here)'
+    required: false
+    default: '.'
+  build-dir:
+    description: 'Directory where avendish wrote the per-backend output (wasm artifacts expected under <build-dir>/wasm/)'
+    required: false
+    default: 'build'
+  output-dir:
+    description: 'Directory where the packaged zip will be written'
+    required: false
+    default: 'package'
+  os-tag:
+    description: 'OS tag used in artifact name: linux | macos | windows (wasm is typically built on linux/x86_64 only)'
+    required: true
+  arch-tag:
+    description: 'Architecture tag used in artifact name: x86_64 | arm64'
+    required: true
+  # macOS signing inputs — unused for wasm (no native binaries), kept for parity across package-*-addon actions
+  macos-certificate-base64:
+    description: 'Unused for wasm (no signing). Kept for input parity.'
+    required: false
+    default: ''
+  macos-certificate-password:
+    description: 'Unused for wasm (no signing). Kept for input parity.'
+    required: false
+    default: ''
+  macos-notarize-team-id:
+    description: 'Unused for wasm (no signing). Kept for input parity.'
+    required: false
+    default: ''
+  macos-notarize-apple-id:
+    description: 'Unused for wasm (no signing). Kept for input parity.'
+    required: false
+    default: ''
+  macos-notarize-password:
+    description: 'Unused for wasm (no signing). Kept for input parity.'
+    required: false
+    default: ''
+  # Windows signing inputs — unused for wasm, kept for parity
+  windows-certificate-base64:
+    description: 'Unused for wasm (no signing). Kept for input parity.'
+    required: false
+    default: ''
+  windows-certificate-password:
+    description: 'Unused for wasm (no signing). Kept for input parity.'
+    required: false
+    default: ''
+
+outputs:
+  zip-path:
+    description: 'Absolute path to the produced zip file'
+    value: ${{ steps.zip.outputs.zip-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Prepare paths
+      id: paths
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "${{ inputs.output-dir }}"
+        OUTPUT_DIR="$(cd "${{ inputs.output-dir }}" && pwd)"
+        PKG_DIR="$OUTPUT_DIR/${{ inputs.addon-name }}"
+        rm -rf "$PKG_DIR"
+        mkdir -p "$PKG_DIR"
+        ZIP_NAME="${{ inputs.addon-name }}-wasm-${{ inputs.os-tag }}-${{ inputs.arch-tag }}.zip"
+        ZIP_PATH="$OUTPUT_DIR/$ZIP_NAME"
+        echo "WASM_OUTPUT_DIR=$OUTPUT_DIR" >> "$GITHUB_ENV"
+        echo "WASM_PKG_DIR=$PKG_DIR" >> "$GITHUB_ENV"
+        echo "WASM_ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+        echo "WASM_ZIP_PATH=$ZIP_PATH" >> "$GITHUB_ENV"
+
+    - name: Collect wasm/js/html companion files
+      shell: bash
+      run: |
+        set -euo pipefail
+        WASM_SRC="${{ inputs.build-dir }}/wasm"
+        if [[ ! -d "$WASM_SRC" ]]; then
+          echo "Error: wasm build output directory '$WASM_SRC' does not exist"
+          ls -la "${{ inputs.build-dir }}" || true
+          exit 1
+        fi
+
+        echo "Looking for wasm artifacts in $WASM_SRC:"
+        ls -la "$WASM_SRC" || true
+
+        # avendish emits more than just <port>.wasm + <port>.js:
+        #   - <port>.mjs (NOT .js — SUFFIX is .mjs)
+        #   - <port>.html standalone demo
+        #   - <port>-worklet.js, <port>-standalone.js
+        #   - shared helpers: avnd-ringbuf.js, avnd-audio-helper.js, avnd-dsp.js,
+        #     avnd-ui.js, avnd-node-runner.mjs, avnd-dev-server.mjs
+        #   - WAM2 subdir: wam/<port>/{index.js,node.js,processor.js,gui.js,
+        #     descriptor.json,package.json,<port>.mjs,<port>.wasm}
+        # Easiest: copy the whole wasm/ tree into the package. The index.html
+        # generator below globs *.html so the demo entries still light up.
+        cp -R "$WASM_SRC/." "$WASM_PKG_DIR/"
+
+        FOUND_WASM=$(find "$WASM_PKG_DIR" -type f -name '*.wasm' | wc -l)
+        if [[ "$FOUND_WASM" -eq 0 ]]; then
+          echo "Error: no .wasm files found under '$WASM_SRC'"
+          exit 1
+        fi
+        echo "Collected $FOUND_WASM wasm port(s) (incl. companion .mjs/.html, shared avnd-*.js, WAM2 subdirs)."
+
+    - name: Generate index.html
+      shell: bash
+      run: |
+        set -euo pipefail
+        ADDON_NAME='${{ inputs.addon-name }}'
+        INDEX="$WASM_PKG_DIR/index.html"
+
+        {
+          echo '<!doctype html>'
+          echo '<meta charset="utf-8">'
+          echo "<title>${ADDON_NAME} demos</title>"
+          echo '<style>body{font-family:system-ui,sans-serif;max-width:42rem;margin:2rem auto;padding:0 1rem;}li{margin:.25rem 0;}</style>'
+          echo "<h1>${ADDON_NAME} &mdash; avendish wasm demos</h1>"
+          echo '<p>Each port below ran through avendish&rsquo;s wasm backend. Click a port to open its emscripten-generated demo.</p>'
+          echo '<ul>'
+
+          shopt -s nullglob
+          # Iterate over per-port .html files, skipping index.html itself.
+          for html in "$WASM_PKG_DIR"/*.html; do
+            name="$(basename "$html")"
+            if [[ "$name" == "index.html" ]]; then
+              continue
+            fi
+            port="${name%.html}"
+            echo "  <li><a href=\"${name}\">${port}</a></li>"
+          done
+
+          echo '</ul>'
+          echo '<p style="color:#666;font-size:.9em;">Serve this directory over HTTP (browsers block <code>file://</code> wasm loads). For example: <code>python3 -m http.server</code>.</p>'
+        } > "$INDEX"
+
+        echo "Generated $INDEX:"
+        cat "$INDEX"
+
+    - name: Copy LICENSE/README
+      shell: bash
+      run: |
+        set -euo pipefail
+        for f in LICENSE LICENSE.txt LICENSE.md README README.md README.txt; do
+          SRC="${{ inputs.addon-path }}/$f"
+          if [[ -f "$SRC" ]]; then
+            echo "Copying $SRC"
+            cp -f "$SRC" "$WASM_PKG_DIR/"
+          fi
+        done
+
+    - name: Display package contents
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "Package contents for $WASM_PKG_DIR:"
+        ls -la "$WASM_PKG_DIR"
+
+    - name: Create zip
+      id: zip
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd "$WASM_OUTPUT_DIR"
+        rm -f "$WASM_ZIP_PATH"
+        if command -v zip >/dev/null 2>&1; then
+          zip -r "$WASM_ZIP_NAME" "${{ inputs.addon-name }}"
+        elif command -v 7z >/dev/null 2>&1; then
+          7z a -tzip "$WASM_ZIP_NAME" "${{ inputs.addon-name }}"
+        else
+          powershell -NoProfile -Command "Compress-Archive -Path '${{ inputs.addon-name }}' -DestinationPath '$WASM_ZIP_NAME' -Force"
+        fi
+        echo "Created zip: $WASM_ZIP_PATH"
+        ls -la "$WASM_ZIP_PATH"
+        echo "zip-path=$WASM_ZIP_PATH" >> "$GITHUB_OUTPUT"

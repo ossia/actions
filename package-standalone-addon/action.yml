@@ -1,0 +1,380 @@
+name: 'Package Standalone Avendish Addon'
+description: 'Collects standalone executables / app bundles from an avendish build, signs/notarizes on macOS and Windows, and zips into a distributable archive'
+inputs:
+  addon-name:
+    description: 'Name of the addon (used in the resulting zip name)'
+    required: true
+  addon-path:
+    description: 'Path to addon source root (where LICENSE / README live)'
+    required: false
+    default: '.'
+  build-dir:
+    description: 'Build directory containing the avendish output tree (standalone subdir)'
+    required: false
+    default: 'build'
+  output-dir:
+    description: 'Directory in which to write the zip'
+    required: false
+    default: 'package'
+  os-tag:
+    description: 'OS tag used in the zip name: linux | macos | windows'
+    required: true
+  arch-tag:
+    description: 'Architecture tag used in the zip name: x86_64 | arm64'
+    required: true
+  macos-certificate-base64:
+    description: 'Base64-encoded P12 certificate for macOS code signing (optional)'
+    required: false
+    default: ''
+  macos-certificate-password:
+    description: 'Password for macOS P12 certificate (optional)'
+    required: false
+    default: ''
+  macos-notarize-team-id:
+    description: 'Apple Developer Team ID for notarization (optional)'
+    required: false
+    default: ''
+  macos-notarize-apple-id:
+    description: 'Apple ID for notarization (optional)'
+    required: false
+    default: ''
+  macos-notarize-password:
+    description: 'App-specific password for notarization (optional)'
+    required: false
+    default: ''
+  windows-certificate-base64:
+    description: 'Base64-encoded PFX certificate for Windows code signing (optional)'
+    required: false
+    default: ''
+  windows-certificate-password:
+    description: 'Password for Windows PFX certificate (optional)'
+    required: false
+    default: ''
+
+outputs:
+  zip-path:
+    description: 'Absolute path to the generated zip'
+    value: ${{ steps.zip.outputs.zip-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Import code signing certificate (macOS)
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != ''
+      uses: jcelerier/import-codesign-certs@master
+      with:
+        p12-file-base64: ${{ inputs.macos-certificate-base64 }}
+        p12-password: ${{ inputs.macos-certificate-password }}
+
+    - name: Prepare staging directory
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "${{ inputs.output-dir }}/staging"
+        OUT_ABS=$(cd "${{ inputs.output-dir }}" && pwd)
+        echo "STANDALONE_OUTPUT_ABS=$OUT_ABS" >> $GITHUB_ENV
+        echo "STANDALONE_STAGING_ABS=$OUT_ABS/staging" >> $GITHUB_ENV
+
+    - name: Collect standalone artifacts (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        BUILD_STANDALONE_DIR="${{ inputs.build-dir }}/standalone"
+        if [[ ! -d "$BUILD_STANDALONE_DIR" ]]; then
+          echo "No standalone build directory found at $BUILD_STANDALONE_DIR"
+          ls -la "${{ inputs.build-dir }}" || true
+          exit 1
+        fi
+
+        echo "Looking for .app bundles in $BUILD_STANDALONE_DIR:"
+        ls -la "$BUILD_STANDALONE_DIR"
+
+        FOUND=0
+        # macOS: each .app bundle goes at the staging root (zip-root)
+        while IFS= read -r -d '' bundle; do
+          echo "Copying .app bundle: $bundle"
+          cp -R "$bundle" "$STANDALONE_STAGING_ABS/"
+          FOUND=$((FOUND + 1))
+        done < <(find "$BUILD_STANDALONE_DIR" -maxdepth 1 -name '*.app' -type d -print0)
+
+        if [[ $FOUND -eq 0 ]]; then
+          echo "Error: no .app bundles found in $BUILD_STANDALONE_DIR"
+          exit 1
+        fi
+
+        echo "Staged .app bundles:"
+        ls -la "$STANDALONE_STAGING_ABS"
+
+    - name: Collect standalone artifacts (Windows)
+      if: runner.os == 'Windows'
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        BUILD_STANDALONE_DIR="${{ inputs.build-dir }}/standalone"
+        if [[ ! -d "$BUILD_STANDALONE_DIR" ]]; then
+          echo "No standalone build directory found at $BUILD_STANDALONE_DIR"
+          ls -la "${{ inputs.build-dir }}" || true
+          exit 1
+        fi
+
+        echo "Looking for .exe + co-located .dll in $BUILD_STANDALONE_DIR:"
+        ls -la "$BUILD_STANDALONE_DIR"
+
+        APP_DIR="$STANDALONE_STAGING_ABS/${{ inputs.addon-name }}"
+        mkdir -p "$APP_DIR"
+
+        FOUND=0
+        while IFS= read -r -d '' exe; do
+          echo "Copying .exe: $exe"
+          cp -f "$exe" "$APP_DIR/"
+          FOUND=$((FOUND + 1))
+        done < <(find "$BUILD_STANDALONE_DIR" -maxdepth 1 -name '*.exe' -type f -print0)
+
+        if [[ $FOUND -eq 0 ]]; then
+          echo "Error: no .exe binaries found in $BUILD_STANDALONE_DIR"
+          exit 1
+        fi
+
+        # Copy any sibling DLL runtime dependencies the build dropped
+        while IFS= read -r -d '' dll; do
+          echo "Copying runtime .dll: $dll"
+          cp -f "$dll" "$APP_DIR/"
+        done < <(find "$BUILD_STANDALONE_DIR" -maxdepth 1 -name '*.dll' -type f -print0)
+
+        echo "Staged contents:"
+        ls -la "$APP_DIR"
+
+    - name: Collect standalone artifacts (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        BUILD_STANDALONE_DIR="${{ inputs.build-dir }}/standalone"
+        if [[ ! -d "$BUILD_STANDALONE_DIR" ]]; then
+          echo "No standalone build directory found at $BUILD_STANDALONE_DIR"
+          ls -la "${{ inputs.build-dir }}" || true
+          exit 1
+        fi
+
+        echo "Looking for executables + co-located .so in $BUILD_STANDALONE_DIR:"
+        ls -la "$BUILD_STANDALONE_DIR"
+
+        APP_DIR="$STANDALONE_STAGING_ABS/${{ inputs.addon-name }}"
+        mkdir -p "$APP_DIR"
+
+        FOUND=0
+        # Linux: executables don't carry an extension. Pick any executable
+        # regular file in the standalone dir, skipping shared libs.
+        while IFS= read -r -d '' bin; do
+          case "$bin" in
+            *.so|*.so.*) continue ;;
+          esac
+          echo "Copying executable: $bin"
+          cp -f "$bin" "$APP_DIR/"
+          chmod +x "$APP_DIR/$(basename "$bin")"
+          FOUND=$((FOUND + 1))
+        done < <(find "$BUILD_STANDALONE_DIR" -maxdepth 1 -type f -executable -print0)
+
+        if [[ $FOUND -eq 0 ]]; then
+          echo "Error: no executable binaries found in $BUILD_STANDALONE_DIR"
+          exit 1
+        fi
+
+        # Co-located shared-library runtime deps
+        while IFS= read -r -d '' so; do
+          echo "Copying runtime .so: $so"
+          cp -f "$so" "$APP_DIR/"
+        done < <(find "$BUILD_STANDALONE_DIR" -maxdepth 1 -type f \( -name '*.so' -o -name '*.so.*' \) -print0)
+
+        echo "Staged contents:"
+        ls -la "$APP_DIR"
+
+    - name: Sign standalone .app bundles (macOS)
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        IDENTITY="ossia.io"
+
+        for bundle in "$STANDALONE_STAGING_ABS"/*.app; do
+          if [[ ! -e "$bundle" ]]; then
+            continue
+          fi
+          echo "Codesigning $bundle"
+          codesign --deep --force --options runtime --timestamp \
+            --sign "$IDENTITY" "$bundle"
+          codesign --verify --verbose=2 "$bundle" || true
+        done
+
+    - name: Notarize standalone .app bundles (macOS)
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != '' && inputs.macos-notarize-team-id != '' && inputs.macos-notarize-apple-id != '' && inputs.macos-notarize-password != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        TEAM_ID="${{ inputs.macos-notarize-team-id }}"
+        APPLE_ID="${{ inputs.macos-notarize-apple-id }}"
+        APP_PWD="${{ inputs.macos-notarize-password }}"
+
+        for bundle in "$STANDALONE_STAGING_ABS"/*.app; do
+          if [[ ! -e "$bundle" ]]; then
+            continue
+          fi
+          echo "Notarizing $bundle"
+
+          tmpzip="${bundle}.notarize.zip"
+          # ditto preserves bundle structure properly
+          ditto -c -k --keepParent "$bundle" "$tmpzip"
+
+          xcrun notarytool submit "$tmpzip" \
+            --team-id "$TEAM_ID" \
+            --apple-id "$APPLE_ID" \
+            --password "$APP_PWD" \
+            --wait
+
+          rm -f "$tmpzip"
+
+          echo "Stapling $bundle"
+          xcrun stapler staple "$bundle"
+          xcrun stapler validate "$bundle" || true
+        done
+
+    - name: Sign standalone binaries (Windows)
+      if: runner.os == 'Windows' && inputs.windows-certificate-base64 != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        PFX_FILE="$(mktemp -u).pfx"
+        echo "${{ inputs.windows-certificate-base64 }}" | base64 -d > "$PFX_FILE"
+
+        # signtool isn't typically on PATH in MSYS — try a couple of common spots
+        SIGNTOOL=""
+        for candidate in \
+            "/c/Program Files (x86)/Windows Kits/10/bin/x64/signtool.exe" \
+            "/c/Program Files (x86)/Windows Kits/10/App Certification Kit/signtool.exe"; do
+          if [[ -e "$candidate" ]]; then
+            SIGNTOOL="$candidate"
+            break
+          fi
+        done
+        if [[ -z "$SIGNTOOL" ]]; then
+          SIGNTOOL=$(find "/c/Program Files (x86)/Windows Kits/10/bin" -name 'signtool.exe' -path '*x64*' 2>/dev/null | sort -r | head -1)
+        fi
+        if [[ -z "$SIGNTOOL" || ! -e "$SIGNTOOL" ]]; then
+          echo "Error: signtool.exe not found"
+          rm -f "$PFX_FILE"
+          exit 1
+        fi
+        echo "Using signtool: $SIGNTOOL"
+
+        PWD_ARG='${{ inputs.windows-certificate-password }}'
+
+        APP_DIR="$STANDALONE_STAGING_ABS/${{ inputs.addon-name }}"
+
+        while IFS= read -r -d '' bin; do
+          echo "Signing $bin"
+          "$SIGNTOOL" sign //f "$PFX_FILE" //p "$PWD_ARG" \
+            //tr http://timestamp.digicert.com //td sha256 //fd sha256 \
+            "$bin"
+        done < <(find "$APP_DIR" -maxdepth 1 \( -name '*.exe' -o -name '*.dll' \) -print0)
+
+        rm -f "$PFX_FILE"
+
+    - name: Add metadata (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        cat > "$STANDALONE_STAGING_ABS/README.txt" <<'EOF'
+        Drag the .app to /Applications or run from anywhere.
+        EOF
+
+        if [[ -f "${{ inputs.addon-path }}/LICENSE" ]]; then
+          cp -f "${{ inputs.addon-path }}/LICENSE" "$STANDALONE_STAGING_ABS/"
+        elif [[ -f "${{ inputs.addon-path }}/LICENSE.txt" ]]; then
+          cp -f "${{ inputs.addon-path }}/LICENSE.txt" "$STANDALONE_STAGING_ABS/"
+        fi
+
+    - name: Add metadata (Windows)
+      if: runner.os == 'Windows'
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        APP_DIR="$STANDALONE_STAGING_ABS/${{ inputs.addon-name }}"
+
+        # Find a representative exe name for the README
+        BIN_NAME=$(find "$APP_DIR" -maxdepth 1 -name '*.exe' -printf '%f\n' | head -1)
+        if [[ -z "$BIN_NAME" ]]; then
+          BIN_NAME="${{ inputs.addon-name }}.exe"
+        fi
+
+        cat > "$STANDALONE_STAGING_ABS/README.txt" <<EOF
+        Run ${BIN_NAME}.
+        EOF
+
+        if [[ -f "${{ inputs.addon-path }}/LICENSE" ]]; then
+          cp -f "${{ inputs.addon-path }}/LICENSE" "$STANDALONE_STAGING_ABS/"
+        elif [[ -f "${{ inputs.addon-path }}/LICENSE.txt" ]]; then
+          cp -f "${{ inputs.addon-path }}/LICENSE.txt" "$STANDALONE_STAGING_ABS/"
+        fi
+
+    - name: Add metadata (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        APP_DIR="$STANDALONE_STAGING_ABS/${{ inputs.addon-name }}"
+
+        BIN_NAME=$(find "$APP_DIR" -maxdepth 1 -type f -executable ! -name '*.so' ! -name '*.so.*' -printf '%f\n' | head -1)
+        if [[ -z "$BIN_NAME" ]]; then
+          BIN_NAME="${{ inputs.addon-name }}"
+        fi
+
+        cat > "$STANDALONE_STAGING_ABS/README.txt" <<EOF
+        Run ./${BIN_NAME}.
+
+        May require Qt 6 runtime libs (libQt6Core, libQt6Widgets, ...) —
+        install via your distribution package manager if missing.
+        EOF
+
+        if [[ -f "${{ inputs.addon-path }}/LICENSE" ]]; then
+          cp -f "${{ inputs.addon-path }}/LICENSE" "$STANDALONE_STAGING_ABS/"
+        elif [[ -f "${{ inputs.addon-path }}/LICENSE.txt" ]]; then
+          cp -f "${{ inputs.addon-path }}/LICENSE.txt" "$STANDALONE_STAGING_ABS/"
+        fi
+
+    - name: Create zip
+      id: zip
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        ZIP_NAME="${{ inputs.addon-name }}-standalone-${{ inputs.os-tag }}-${{ inputs.arch-tag }}.zip"
+        ZIP_PATH="$STANDALONE_OUTPUT_ABS/$ZIP_NAME"
+        rm -f "$ZIP_PATH"
+
+        cd "$STANDALONE_STAGING_ABS"
+
+        if command -v zip >/dev/null 2>&1; then
+          # -y preserves symlinks (important for macOS .app bundles),
+          # -X drops extra file attributes for reproducibility.
+          zip -r -y -X "$ZIP_PATH" .
+        elif command -v 7z >/dev/null 2>&1; then
+          7z a "$ZIP_PATH" .
+        else
+          echo "Error: neither zip nor 7z is available"
+          exit 1
+        fi
+
+        echo "zip-path=$ZIP_PATH" >> $GITHUB_OUTPUT
+        echo "Created: $ZIP_PATH"
+        ls -la "$ZIP_PATH"

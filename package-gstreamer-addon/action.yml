@@ -1,0 +1,243 @@
+name: 'Package GStreamer Avendish Addon'
+description: 'Collects GStreamer 1.0 plugin libraries from an avendish build, signs on macOS, and zips into a distributable archive'
+inputs:
+  addon-name:
+    description: 'Name of the addon (used in the resulting zip name)'
+    required: true
+  addon-path:
+    description: 'Path to addon source root (where LICENSE / README live)'
+    required: false
+    default: '.'
+  build-dir:
+    description: 'Build directory containing the avendish output tree (gstreamer subdir)'
+    required: false
+    default: 'build'
+  output-dir:
+    description: 'Directory in which to write the zip'
+    required: false
+    default: 'package'
+  os-tag:
+    description: 'OS tag used in the zip name: linux | macos | windows'
+    required: true
+  arch-tag:
+    description: 'Architecture tag used in the zip name: x86_64 | arm64'
+    required: true
+  macos-certificate-base64:
+    description: 'Base64-encoded P12 certificate for macOS code signing (optional)'
+    required: false
+    default: ''
+  macos-certificate-password:
+    description: 'Password for macOS P12 certificate (optional)'
+    required: false
+    default: ''
+  macos-notarize-team-id:
+    description: 'Apple Developer Team ID for notarization (optional; ignored for loose dylibs)'
+    required: false
+    default: ''
+  macos-notarize-apple-id:
+    description: 'Apple ID for notarization (optional; ignored for loose dylibs)'
+    required: false
+    default: ''
+  macos-notarize-password:
+    description: 'App-specific password for notarization (optional; ignored for loose dylibs)'
+    required: false
+    default: ''
+  windows-certificate-base64:
+    description: 'Base64-encoded PFX certificate for Windows code signing (optional; no-op for gstreamer)'
+    required: false
+    default: ''
+  windows-certificate-password:
+    description: 'Password for Windows PFX certificate (optional; no-op for gstreamer)'
+    required: false
+    default: ''
+
+outputs:
+  zip-path:
+    description: 'Absolute path to the generated zip'
+    value: ${{ steps.zip.outputs.zip-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Import code signing certificate (macOS)
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != ''
+      uses: jcelerier/import-codesign-certs@master
+      with:
+        p12-file-base64: ${{ inputs.macos-certificate-base64 }}
+        p12-password: ${{ inputs.macos-certificate-password }}
+
+    - name: Prepare staging directory
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "${{ inputs.output-dir }}/staging"
+        OUT_ABS=$(cd "${{ inputs.output-dir }}" && pwd)
+        echo "GST_OUTPUT_ABS=$OUT_ABS" >> $GITHUB_ENV
+        echo "GST_STAGING_ABS=$OUT_ABS/staging" >> $GITHUB_ENV
+
+    - name: Collect GStreamer plugins
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        BUILD_GST_DIR="${{ inputs.build-dir }}/gstreamer"
+        if [[ ! -d "$BUILD_GST_DIR" ]]; then
+          echo "No gstreamer build directory found at $BUILD_GST_DIR"
+          ls -la "${{ inputs.build-dir }}" || true
+          exit 1
+        fi
+
+        echo "Looking for plugin shared libraries in $BUILD_GST_DIR:"
+        ls -la "$BUILD_GST_DIR"
+
+        FOUND=0
+
+        # avendish doesn't enforce the libgst* GStreamer naming convention — it just
+        # builds a MODULE library named after the port's C_NAME. CMake adds the
+        # platform's MODULE prefix automatically (lib on Linux/macOS, nothing on
+        # Windows), so the output is lib<C_NAME>.{so,dylib} or <C_NAME>.dll.
+        # Users who want the conventional 'gst' filename prefix should set
+        # their port's C_NAME to gst<name> (see the in-zip README for guidance).
+        case "${{ inputs.os-tag }}" in
+          linux)
+            # lib*.so — skip dot-files / editor backups (~, .bak, .orig).
+            while IFS= read -r -d '' plugin; do
+              base="$(basename "$plugin")"
+              case "$base" in
+                .*|*~|*.bak|*.orig) continue ;;
+              esac
+              echo "Copying plugin: $plugin"
+              cp -f "$plugin" "$GST_STAGING_ABS/"
+              FOUND=$((FOUND + 1))
+            done < <(find "$BUILD_GST_DIR" -maxdepth 1 -type f \
+                       \( -name 'lib*.so' -o -name 'lib*.so.*' \) -print0)
+            ;;
+          macos)
+            # macOS MODULE libs can land as either lib*.so (CMake default) or
+            # lib*.dylib depending on toolchain.
+            while IFS= read -r -d '' plugin; do
+              base="$(basename "$plugin")"
+              case "$base" in
+                .*|*~|*.bak|*.orig) continue ;;
+              esac
+              echo "Copying plugin: $plugin"
+              cp -f "$plugin" "$GST_STAGING_ABS/"
+              FOUND=$((FOUND + 1))
+            done < <(find "$BUILD_GST_DIR" -maxdepth 1 -type f \
+                       \( -name 'lib*.so' -o -name 'lib*.dylib' \) -print0)
+            ;;
+          windows)
+            while IFS= read -r -d '' plugin; do
+              echo "Copying plugin: $plugin"
+              cp -f "$plugin" "$GST_STAGING_ABS/"
+              FOUND=$((FOUND + 1))
+            done < <(find "$BUILD_GST_DIR" -maxdepth 1 -type f -name '*.dll' -print0)
+            ;;
+          *)
+            echo "Error: unsupported os-tag '${{ inputs.os-tag }}'"
+            exit 1
+            ;;
+        esac
+
+        if [[ $FOUND -eq 0 ]]; then
+          echo "Error: no GStreamer plugin libraries found in $BUILD_GST_DIR"
+          exit 1
+        fi
+
+        echo "Staged plugins:"
+        ls -la "$GST_STAGING_ABS"
+
+    - name: Sign GStreamer plugins (macOS)
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        IDENTITY="ossia.io"
+
+        shopt -s nullglob
+        for dylib in "$GST_STAGING_ABS"/*.dylib; do
+          echo "Codesigning $dylib"
+          codesign --force --options runtime --timestamp \
+            --sign "$IDENTITY" "$dylib"
+          codesign --verify --verbose=2 "$dylib" || true
+        done
+        shopt -u nullglob
+
+        # Bare-dylib notarization rarely works without an enclosing app/pkg.
+        # Allow the attempt but never fail the build.
+        if [[ -n "${{ inputs.macos-notarize-team-id }}" \
+           && -n "${{ inputs.macos-notarize-apple-id }}" \
+           && -n "${{ inputs.macos-notarize-password }}" ]]; then
+          echo "Notarization of loose .dylib plugins is rarely supported — attempting but ignoring failure."
+          TEAM_ID="${{ inputs.macos-notarize-team-id }}"
+          APPLE_ID="${{ inputs.macos-notarize-apple-id }}"
+          APP_PWD="${{ inputs.macos-notarize-password }}"
+
+          shopt -s nullglob
+          for dylib in "$GST_STAGING_ABS"/*.dylib; do
+            tmpzip="${dylib}.notarize.zip"
+            ditto -c -k --keepParent "$dylib" "$tmpzip"
+            xcrun notarytool submit "$tmpzip" \
+              --team-id "$TEAM_ID" \
+              --apple-id "$APPLE_ID" \
+              --password "$APP_PWD" \
+              --wait || echo "Notarization of $dylib failed (non-fatal for loose dylib)"
+            rm -f "$tmpzip"
+          done
+          shopt -u nullglob
+        fi
+
+    - name: Add metadata
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        cat > "$GST_STAGING_ABS/README.txt" <<'EOF'
+        GStreamer 1.0 plugins.
+
+        Copy the lib*.{so,dylib} (or *.dll on Windows) files in this zip
+        to your GStreamer plugin path:
+          - Linux:   ~/.local/share/gstreamer-1.0/plugins/
+          - macOS:   ~/Library/Application Support/gstreamer-1.0/plugins/
+          - Windows: %APPDATA%\gstreamer-1.0\plugins\
+        Then run `gst-inspect-1.0 <plugin>` to verify the plugin loads.
+
+        Note: avendish builds the plugin shared library after the port's
+        C_NAME without forcing a `gst` prefix. For maximum convention
+        compliance, name your avendish port's C_NAME with a `gst` prefix
+        (so the binary is libgst<name>.so / gst<name>.dll) before
+        publishing — `gst-inspect-1.0` and many integration paths assume
+        that naming.
+        EOF
+
+        if [[ -f "${{ inputs.addon-path }}/LICENSE" ]]; then
+          cp -f "${{ inputs.addon-path }}/LICENSE" "$GST_STAGING_ABS/"
+        elif [[ -f "${{ inputs.addon-path }}/LICENSE.txt" ]]; then
+          cp -f "${{ inputs.addon-path }}/LICENSE.txt" "$GST_STAGING_ABS/"
+        fi
+
+    - name: Create zip
+      id: zip
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        ZIP_NAME="${{ inputs.addon-name }}-gstreamer-${{ inputs.os-tag }}-${{ inputs.arch-tag }}.zip"
+        ZIP_PATH="$GST_OUTPUT_ABS/$ZIP_NAME"
+        rm -f "$ZIP_PATH"
+
+        cd "$GST_STAGING_ABS"
+
+        if command -v zip >/dev/null 2>&1; then
+          zip -r -y -X "$ZIP_PATH" .
+        elif command -v 7z >/dev/null 2>&1; then
+          7z a "$ZIP_PATH" .
+        else
+          echo "Error: neither zip nor 7z is available"
+          exit 1
+        fi
+
+        echo "zip-path=$ZIP_PATH" >> $GITHUB_OUTPUT
+        echo "Created: $ZIP_PATH"
+        ls -la "$ZIP_PATH"

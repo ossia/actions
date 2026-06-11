@@ -1,0 +1,204 @@
+name: 'Package avendish Pd Addon'
+description: 'Packages an avendish-built Pure Data external library (Deken-compatible layout) into a release zip'
+inputs:
+  addon-name:
+    description: 'Name of the addon (used as folder & zip prefix)'
+    required: true
+  addon-path:
+    description: 'Path to addon source root (LICENSE/README, optional help/ directory live here)'
+    required: false
+    default: '.'
+  build-dir:
+    description: 'Directory where avendish wrote the per-backend output (Pd externals expected under <build-dir>/pd/)'
+    required: false
+    default: 'build'
+  output-dir:
+    description: 'Directory where the packaged zip will be written'
+    required: false
+    default: 'package'
+  os-tag:
+    description: 'OS tag used in artifact name: linux | macos | windows'
+    required: true
+  arch-tag:
+    description: 'Architecture tag used in artifact name: x86_64 | arm64'
+    required: true
+  # macOS signing inputs (unused for Pd externals — kept for input parity across package-*-addon actions)
+  macos-certificate-base64:
+    description: 'Unused for Pd (no signing). Kept for input parity.'
+    required: false
+    default: ''
+  macos-certificate-password:
+    description: 'Unused for Pd (no signing). Kept for input parity.'
+    required: false
+    default: ''
+  macos-notarize-team-id:
+    description: 'Unused for Pd (no signing). Kept for input parity.'
+    required: false
+    default: ''
+  macos-notarize-apple-id:
+    description: 'Unused for Pd (no signing). Kept for input parity.'
+    required: false
+    default: ''
+  macos-notarize-password:
+    description: 'Unused for Pd (no signing). Kept for input parity.'
+    required: false
+    default: ''
+  # Windows signing inputs (unused for Pd externals — kept for input parity)
+  windows-certificate-base64:
+    description: 'Unused for Pd (no signing). Kept for input parity.'
+    required: false
+    default: ''
+  windows-certificate-password:
+    description: 'Unused for Pd (no signing). Kept for input parity.'
+    required: false
+    default: ''
+
+outputs:
+  zip-path:
+    description: 'Absolute path to the produced zip file'
+    value: ${{ steps.zip.outputs.zip-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Prepare paths
+      id: paths
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "${{ inputs.output-dir }}"
+        OUTPUT_DIR="$(cd "${{ inputs.output-dir }}" && pwd)"
+        PKG_DIR="$OUTPUT_DIR/${{ inputs.addon-name }}"
+        rm -rf "$PKG_DIR"
+        mkdir -p "$PKG_DIR"
+        ZIP_NAME="${{ inputs.addon-name }}-pd-${{ inputs.os-tag }}-${{ inputs.arch-tag }}.zip"
+        ZIP_PATH="$OUTPUT_DIR/$ZIP_NAME"
+        echo "OUTPUT_DIR=$OUTPUT_DIR" >> "$GITHUB_ENV"
+        echo "PKG_DIR=$PKG_DIR" >> "$GITHUB_ENV"
+        echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+        echo "ZIP_PATH=$ZIP_PATH" >> "$GITHUB_ENV"
+
+    - name: Collect Pd externals
+      shell: bash
+      run: |
+        set -euo pipefail
+        PD_DIR="${{ inputs.build-dir }}/pd"
+        if [[ ! -d "$PD_DIR" ]]; then
+          echo "Error: Pd build output directory '$PD_DIR' does not exist"
+          exit 1
+        fi
+
+        shopt -s nullglob
+        FOUND=0
+        case "${{ inputs.os-tag }}" in
+          linux)
+            # avendish emits per-arch suffixes: .pd_linux (x86_64), .l_arm/.l_arm64 (ARM),
+            # .l_ia64/.l_i386 (32-bit). Match all of them.
+            while IFS= read -r -d '' f; do
+              echo "Copying external: $f"
+              cp -f "$f" "$PKG_DIR/"
+              FOUND=$((FOUND + 1))
+            done < <(find "$PD_DIR" -maxdepth 2 -type f \( -name '*.pd_*' -o -name '*.l_*' \) -print0)
+            EXT_DESC="*.pd_* / *.l_*"
+            ;;
+          macos)
+            while IFS= read -r -d '' f; do
+              echo "Copying external: $f"
+              cp -f "$f" "$PKG_DIR/"
+              FOUND=$((FOUND + 1))
+            done < <(find "$PD_DIR" -maxdepth 2 -type f -name '*.pd_darwin' -print0)
+            EXT_DESC="*.pd_darwin"
+            ;;
+          windows)
+            while IFS= read -r -d '' f; do
+              echo "Copying external: $f"
+              cp -f "$f" "$PKG_DIR/"
+              FOUND=$((FOUND + 1))
+            done < <(find "$PD_DIR" -maxdepth 2 -type f -name '*.dll' -print0)
+            EXT_DESC="*.dll"
+            ;;
+          *)
+            echo "Error: unsupported os-tag '${{ inputs.os-tag }}'"
+            exit 1
+            ;;
+        esac
+
+        if [[ "$FOUND" -eq 0 ]]; then
+          echo "Error: no Pd externals matching '$EXT_DESC' found under '$PD_DIR'"
+          exit 1
+        fi
+        echo "Collected $FOUND Pd external(s)."
+
+    - name: Copy help patches
+      shell: bash
+      run: |
+        set -euo pipefail
+        HELP_SRC="${{ inputs.addon-path }}/help"
+        if [[ -d "$HELP_SRC" ]]; then
+          shopt -s nullglob
+          for f in "$HELP_SRC"/*.pd; do
+            echo "Copying help patch: $f"
+            cp -f "$f" "$PKG_DIR/"
+          done
+        else
+          echo "No help/ directory at $HELP_SRC — skipping help patches."
+        fi
+
+    - name: Copy or generate Deken meta
+      shell: bash
+      run: |
+        set -euo pipefail
+        META_NAME="${{ inputs.addon-name }}-meta.pd"
+        META_SRC="${{ inputs.addon-path }}/$META_NAME"
+        META_DST="$PKG_DIR/$META_NAME"
+
+        if [[ -f "$META_SRC" ]]; then
+          echo "Copying provided Deken meta file: $META_SRC"
+          cp -f "$META_SRC" "$META_DST"
+        else
+          echo "Generating minimal Deken meta file at: $META_DST"
+          {
+            echo '#N canvas 0 0 450 300 10;'
+            echo "#X declare -version continuous -author \"ossia.io\" -license \"BSD\" -name \"${{ inputs.addon-name }}\";"
+            echo '#X restore;'
+          } > "$META_DST"
+        fi
+
+    - name: Copy LICENSE/README
+      shell: bash
+      run: |
+        set -euo pipefail
+        for f in LICENSE LICENSE.txt LICENSE.md README README.md README.txt; do
+          SRC="${{ inputs.addon-path }}/$f"
+          if [[ -f "$SRC" ]]; then
+            echo "Copying $SRC"
+            cp -f "$SRC" "$PKG_DIR/"
+          fi
+        done
+
+    - name: Display package contents
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "Package contents for $PKG_DIR:"
+        ls -la "$PKG_DIR"
+
+    - name: Create zip
+      id: zip
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd "$OUTPUT_DIR"
+        rm -f "$ZIP_PATH"
+        if command -v zip >/dev/null 2>&1; then
+          zip -r "$ZIP_NAME" "${{ inputs.addon-name }}"
+        else
+          # Fallback (Windows runners ship 7z or PowerShell)
+          if command -v 7z >/dev/null 2>&1; then
+            7z a -tzip "$ZIP_NAME" "${{ inputs.addon-name }}"
+          else
+            powershell -NoProfile -Command "Compress-Archive -Path '${{ inputs.addon-name }}' -DestinationPath '$ZIP_NAME' -Force"
+          fi
+        fi
+        echo "Created zip: $ZIP_PATH"
+        echo "zip-path=$ZIP_PATH" >> "$GITHUB_OUTPUT"

@@ -1,0 +1,257 @@
+name: 'Package Vintage (VST 2.4) Avendish Addon'
+description: 'Collects VST 2.4 plugins from an avendish build, signs/notarizes on macOS and Windows, and zips into a distributable archive'
+inputs:
+  addon-name:
+    description: 'Name of the addon (used in the resulting zip name)'
+    required: true
+  addon-path:
+    description: 'Path to addon source root (where LICENSE / README live)'
+    required: false
+    default: '.'
+  build-dir:
+    description: 'Build directory containing the avendish output tree (vintage subdir)'
+    required: false
+    default: 'build'
+  output-dir:
+    description: 'Directory in which to write the zip'
+    required: false
+    default: 'package'
+  os-tag:
+    description: 'OS tag used in the zip name: linux | macos | windows'
+    required: true
+  arch-tag:
+    description: 'Architecture tag used in the zip name: x86_64 | arm64'
+    required: true
+  macos-certificate-base64:
+    description: 'Base64-encoded P12 certificate for macOS code signing (optional)'
+    required: false
+    default: ''
+  macos-certificate-password:
+    description: 'Password for macOS P12 certificate (optional)'
+    required: false
+    default: ''
+  macos-notarize-team-id:
+    description: 'Apple Developer Team ID for notarization (optional)'
+    required: false
+    default: ''
+  macos-notarize-apple-id:
+    description: 'Apple ID for notarization (optional)'
+    required: false
+    default: ''
+  macos-notarize-password:
+    description: 'App-specific password for notarization (optional)'
+    required: false
+    default: ''
+  windows-certificate-base64:
+    description: 'Base64-encoded PFX certificate for Windows code signing (optional)'
+    required: false
+    default: ''
+  windows-certificate-password:
+    description: 'Password for Windows PFX certificate (optional)'
+    required: false
+    default: ''
+
+outputs:
+  zip-path:
+    description: 'Absolute path to the generated zip'
+    value: ${{ steps.zip.outputs.zip-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Import code signing certificate (macOS)
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != ''
+      uses: jcelerier/import-codesign-certs@master
+      with:
+        p12-file-base64: ${{ inputs.macos-certificate-base64 }}
+        p12-password: ${{ inputs.macos-certificate-password }}
+
+    - name: Prepare staging directory
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "${{ inputs.output-dir }}/staging"
+        OUT_ABS=$(cd "${{ inputs.output-dir }}" && pwd)
+        echo "VST2_OUTPUT_ABS=$OUT_ABS" >> $GITHUB_ENV
+        echo "VST2_STAGING_ABS=$OUT_ABS/staging" >> $GITHUB_ENV
+
+    - name: Collect VST 2.4 plugins
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        # Post-patch avendish output: vintage/<C_NAME>.{so,dll} flat on Linux/Windows;
+        # vintage/<C_NAME>.vst/ bundle directory on macOS.
+        BUILD_VST2_DIR="${{ inputs.build-dir }}/vintage"
+        if [[ ! -d "$BUILD_VST2_DIR" ]]; then
+          echo "Error: vintage build directory '$BUILD_VST2_DIR' does not exist"
+          ls -la "${{ inputs.build-dir }}" || true
+          exit 1
+        fi
+
+        echo "Using VST2 build directory: $BUILD_VST2_DIR"
+        ls -la "$BUILD_VST2_DIR"
+
+        OS_TAG="${{ inputs.os-tag }}"
+
+        FOUND=0
+        if [[ "$OS_TAG" == "macos" ]]; then
+          # .vst on macOS is a bundle directory
+          while IFS= read -r -d '' plugin; do
+            echo "Copying VST2 bundle: $plugin"
+            cp -R "$plugin" "$VST2_STAGING_ABS/"
+            FOUND=$((FOUND + 1))
+          done < <(find "$BUILD_VST2_DIR" -maxdepth 1 -type d -name '*.vst' -print0)
+        elif [[ "$OS_TAG" == "windows" ]]; then
+          while IFS= read -r -d '' plugin; do
+            echo "Copying VST2 DLL: $plugin"
+            cp -f "$plugin" "$VST2_STAGING_ABS/"
+            FOUND=$((FOUND + 1))
+          done < <(find "$BUILD_VST2_DIR" -maxdepth 1 -type f -name '*.dll' -print0)
+        else
+          # linux
+          while IFS= read -r -d '' plugin; do
+            echo "Copying VST2 SO: $plugin"
+            cp -f "$plugin" "$VST2_STAGING_ABS/"
+            FOUND=$((FOUND + 1))
+          done < <(find "$BUILD_VST2_DIR" -maxdepth 1 -type f -name '*.so' -print0)
+        fi
+
+        if [[ $FOUND -eq 0 ]]; then
+          echo "Error: no VST 2.4 plugin artifacts found for os-tag=$OS_TAG in $BUILD_VST2_DIR"
+          exit 1
+        fi
+
+        echo "Staged VST 2.4 plugins:"
+        ls -la "$VST2_STAGING_ABS"
+
+    - name: Sign VST 2.4 bundles (macOS)
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        IDENTITY="ossia.io"
+
+        for bundle in "$VST2_STAGING_ABS"/*.vst; do
+          if [[ ! -e "$bundle" ]]; then
+            continue
+          fi
+          echo "Codesigning $bundle"
+          codesign --deep --force --options runtime --timestamp \
+            --sign "$IDENTITY" "$bundle"
+          codesign --verify --verbose=2 "$bundle" || true
+        done
+
+    - name: Notarize VST 2.4 bundles (macOS)
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != '' && inputs.macos-notarize-team-id != '' && inputs.macos-notarize-apple-id != '' && inputs.macos-notarize-password != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        TEAM_ID="${{ inputs.macos-notarize-team-id }}"
+        APPLE_ID="${{ inputs.macos-notarize-apple-id }}"
+        APP_PWD="${{ inputs.macos-notarize-password }}"
+
+        for bundle in "$VST2_STAGING_ABS"/*.vst; do
+          if [[ ! -e "$bundle" ]]; then
+            continue
+          fi
+          echo "Notarizing $bundle"
+
+          tmpzip="${bundle}.notarize.zip"
+          ditto -c -k --keepParent "$bundle" "$tmpzip"
+
+          xcrun notarytool submit "$tmpzip" \
+            --team-id "$TEAM_ID" \
+            --apple-id "$APPLE_ID" \
+            --password "$APP_PWD" \
+            --wait
+
+          rm -f "$tmpzip"
+
+          echo "Stapling $bundle"
+          xcrun stapler staple "$bundle" || echo "Stapling failed (non-fatal)"
+        done
+
+    - name: Sign VST 2.4 DLLs (Windows)
+      if: runner.os == 'Windows' && inputs.windows-certificate-base64 != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        PFX_FILE="$(mktemp -u).pfx"
+        echo "${{ inputs.windows-certificate-base64 }}" | base64 -d > "$PFX_FILE"
+
+        SIGNTOOL=""
+        for candidate in \
+            "/c/Program Files (x86)/Windows Kits/10/bin/x64/signtool.exe" \
+            "/c/Program Files (x86)/Windows Kits/10/App Certification Kit/signtool.exe"; do
+          if [[ -e "$candidate" ]]; then
+            SIGNTOOL="$candidate"
+            break
+          fi
+        done
+        if [[ -z "$SIGNTOOL" ]]; then
+          SIGNTOOL=$(find "/c/Program Files (x86)/Windows Kits/10/bin" -name 'signtool.exe' -path '*x64*' 2>/dev/null | sort -r | head -1)
+        fi
+        if [[ -z "$SIGNTOOL" || ! -e "$SIGNTOOL" ]]; then
+          echo "Error: signtool.exe not found"
+          rm -f "$PFX_FILE"
+          exit 1
+        fi
+        echo "Using signtool: $SIGNTOOL"
+
+        PWD_ARG='${{ inputs.windows-certificate-password }}'
+
+        for dll in "$VST2_STAGING_ABS"/*.dll; do
+          if [[ ! -e "$dll" ]]; then
+            continue
+          fi
+          echo "Signing $dll"
+          "$SIGNTOOL" sign //f "$PFX_FILE" //p "$PWD_ARG" \
+            //tr http://timestamp.digicert.com //td sha256 //fd sha256 \
+            "$dll"
+        done
+
+        rm -f "$PFX_FILE"
+
+    - name: Add metadata
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        cat > "$VST2_STAGING_ABS/README.txt" <<'EOF'
+        VST 2.4 plugin built from avendish's clean-room ABI implementation (no Steinberg SDK).
+        EOF
+
+        if [[ -f "${{ inputs.addon-path }}/LICENSE" ]]; then
+          cp -f "${{ inputs.addon-path }}/LICENSE" "$VST2_STAGING_ABS/"
+        elif [[ -f "${{ inputs.addon-path }}/LICENSE.txt" ]]; then
+          cp -f "${{ inputs.addon-path }}/LICENSE.txt" "$VST2_STAGING_ABS/"
+        fi
+
+    - name: Create zip
+      id: zip
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        ZIP_NAME="${{ inputs.addon-name }}-vintage-${{ inputs.os-tag }}-${{ inputs.arch-tag }}.zip"
+        ZIP_PATH="$VST2_OUTPUT_ABS/$ZIP_NAME"
+        rm -f "$ZIP_PATH"
+
+        cd "$VST2_STAGING_ABS"
+
+        if command -v zip >/dev/null 2>&1; then
+          zip -r "$ZIP_PATH" .
+        elif command -v 7z >/dev/null 2>&1; then
+          7z a "$ZIP_PATH" .
+        else
+          echo "Error: neither zip nor 7z is available"
+          exit 1
+        fi
+
+        echo "zip-path=$ZIP_PATH" >> $GITHUB_OUTPUT
+        echo "Created: $ZIP_PATH"
+        ls -la "$ZIP_PATH"

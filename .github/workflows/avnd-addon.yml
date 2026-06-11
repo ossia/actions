@@ -1,0 +1,1184 @@
+# Avendish addon CI - reusable workflow
+#
+# Builds an avendish-based addon for any subset of the 12 supported
+# backends across every OS/arch combination each backend supports, packages
+# every produced artifact into an end-user-friendly zip, and publishes the
+# zips to a single rolling "continuous" GitHub prerelease on every push to
+# main / master.
+#
+# Usage in a caller repository (.github/workflows/builds.yaml):
+#
+#   name: Build
+#   on:
+#     push:
+#       branches: [main, master]
+#     pull_request:
+#   concurrency:
+#     group: ${{ github.workflow }}-${{ github.ref }}
+#     cancel-in-progress: true
+#   jobs:
+#     build:
+#       uses: ossia/actions/.github/workflows/avnd-addon.yml@master
+#       secrets: inherit
+#       with:
+#         pd: true
+#         vst3: true
+#         clap: true
+#
+# For the score backend, use the dedicated `score-addon.yml` reusable
+# workflow (different build orchestration — requires a score source/SDK
+# checkout). Run both workflows side-by-side in a caller's `builds.yaml`
+# if the addon ships both as a score plugin and as standalone backends.
+#
+# Composite vs per-OS artifacts:
+#   Backends with `*-composite` in their artifact name ship as a single
+#   cross-platform archive (max, pd, godot). The matching per-OS
+#   artifacts are still produced for users who want to inspect
+#   individual platform builds, but the canonical user-facing download
+#   is the composite zip.
+#
+# Inputs (all booleans, default false - flip to true to enable that backend):
+#   pd             Pure Data external      linux/x86_64, macos/arm64, windows/x86_64
+#   max            Max/MSP external                     macos/arm64, windows/x86_64
+#   vst3           VST3 plugin             linux/x86_64, macos/arm64, windows/x86_64
+#   clap           CLAP plugin             linux/x86_64, macos/arm64, windows/x86_64
+#   vintage        VintageDSP / LV2-like                macos/arm64, windows/x86_64
+#   touchdesigner  TouchDesigner CHOP                   macos/arm64, windows/x86_64
+#   python         Python module           linux/x86_64, macos/arm64, windows/x86_64
+#   godot          Godot GDExtension       linux/x86_64, macos/arm64, windows/x86_64
+#   standalone     standalone executable   linux/x86_64, macos/arm64, windows/x86_64
+#   gstreamer      GStreamer plugin        linux/x86_64, macos/arm64
+#   wasm           WebAssembly (emscripten) linux/x86_64
+#
+# Secrets (all optional - signing / notarization is a no-op without them):
+#   MAC_CERT_B64            Base64-encoded P12 certificate
+#   MAC_CERT_PASSWORD       P12 password
+#   APPLE_TEAM_ID           Apple Developer Team ID
+#   APPLE_ID                Apple ID for notarytool
+#   APPLE_ALTOOL_PASSWORD   App-specific notarization password
+#   WIN_CERT_B64            Base64-encoded PFX certificate
+#   WIN_CERT_PASSWORD       PFX password
+
+name: Avendish addon CI
+
+on:
+  workflow_call:
+    inputs:
+      pd:
+        description: 'Build Pure Data external backend'
+        required: false
+        type: boolean
+        default: false
+      max:
+        description: 'Build Max/MSP external backend'
+        required: false
+        type: boolean
+        default: false
+      vst3:
+        description: 'Build VST3 backend'
+        required: false
+        type: boolean
+        default: false
+      clap:
+        description: 'Build CLAP backend'
+        required: false
+        type: boolean
+        default: false
+      vintage:
+        description: 'Build VintageDSP backend'
+        required: false
+        type: boolean
+        default: false
+      touchdesigner:
+        description: 'Build TouchDesigner backend'
+        required: false
+        type: boolean
+        default: false
+      python:
+        description: 'Build Python backend'
+        required: false
+        type: boolean
+        default: false
+      godot:
+        description: 'Build Godot GDExtension backend'
+        required: false
+        type: boolean
+        default: false
+      standalone:
+        description: 'Build standalone executable backend'
+        required: false
+        type: boolean
+        default: false
+      gstreamer:
+        description: 'Build GStreamer backend'
+        required: false
+        type: boolean
+        default: false
+      wasm:
+        description: 'Build WebAssembly (emscripten) backend'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      MAC_CERT_B64:
+        required: false
+      MAC_CERT_PASSWORD:
+        required: false
+      APPLE_TEAM_ID:
+        required: false
+      APPLE_ID:
+        required: false
+      APPLE_ALTOOL_PASSWORD:
+        required: false
+      WIN_CERT_B64:
+        required: false
+      WIN_CERT_PASSWORD:
+        required: false
+
+# Shared anchors are not supported in GitHub Actions YAML; the per-backend
+# jobs below are intentionally near-identical and mostly differ only in the
+# backend name, the matrix, and the -D flag passed to CMake.
+#
+# CMake flag convention (uppercase):  -DAVND_ENABLE_<BACKEND>=ON
+# TODO: align with avendish CMake flag naming once standardised upstream.
+
+jobs:
+  # ---------------- pd ----------------
+  pd:
+    name: "pd (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
+    if: ${{ inputs.pd }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04,    os-tag: linux,   arch-tag: x86_64 }
+          - { os: macos-15,        os-tag: macos,   arch-tag: arm64  }
+          - { os: windows-latest,  os-tag: windows, arch-tag: x86_64 }
+    steps:
+      - name: Support longpaths
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.longpaths true
+      - uses: maxim-lobanov/setup-xcode@v1
+        if: runner.os == 'macOS'
+        with:
+          xcode-version: '>=16.4'
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: addon
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt -y update
+          sudo apt install -yqq puredata-dev jq zip
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: brew install pure-data jq || true
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: choco install -y puredata jq zip ninja
+      - name: Download OSSIA SDK
+        id: ossia-sdk
+        uses: ossia/actions/download-ossia-sdk@master
+      - name: Configure & build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S addon -B addon/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DAVND_ENABLE_PD=ON
+          cmake --build addon/build --config Release
+      - name: Package pd backend
+        id: package
+        uses: ossia/actions/package-pd-addon@master
+        with:
+          addon-name: ${{ github.event.repository.name }}
+          addon-path: addon
+          build-dir: addon/build
+          output-dir: package
+          os-tag: ${{ matrix.os-tag }}
+          arch-tag: ${{ matrix.arch-tag }}
+          macos-certificate-base64: ${{ secrets.MAC_CERT_B64 }}
+          macos-certificate-password: ${{ secrets.MAC_CERT_PASSWORD }}
+          macos-notarize-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          macos-notarize-apple-id: ${{ secrets.APPLE_ID }}
+          macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
+          windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
+          windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pd-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
+          path: ${{ steps.package.outputs.zip-path }}
+
+  # ---------------- pd-composite ----------------
+  # Pure Data via Deken expects a single cross-platform folder containing
+  # *.pd_linux + *.pd_darwin + *.dll side-by-side. We unzip every per-OS
+  # pd artifact and union their contents into one staging dir.
+  pd-composite:
+    if: ${{ inputs.pd }}
+    needs: pd
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pd-*
+          merge-multiple: false
+          path: per-os
+      - name: Install zip tools
+        shell: bash
+        run: |
+          sudo apt -y update
+          sudo apt install -yqq zip unzip
+      - name: Merge per-OS Pd artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          ADDON="${{ github.event.repository.name }}"
+          mkdir -p "staging/$ADDON"
+
+          shopt -s nullglob
+          ZIPS=( per-os/*/${ADDON}-pd-*.zip )
+          if [[ ${#ZIPS[@]} -eq 0 ]]; then
+            echo "Error: no per-OS pd artifacts found under per-os/"
+            ls -lR per-os || true
+            exit 1
+          fi
+
+          for z in "${ZIPS[@]}"; do
+            dest="unzipped-$(basename "$z" .zip)"
+            mkdir -p "$dest"
+            unzip -o "$z" -d "$dest"
+            # Union every file from <addon>/ into staging/<addon>/.
+            if [[ -d "$dest/$ADDON" ]]; then
+              cp -Rn "$dest/$ADDON/." "staging/$ADDON/" 2>/dev/null || \
+                cp -R "$dest/$ADDON/." "staging/$ADDON/"
+            fi
+            rm -rf "$dest"
+          done
+
+          echo "Composite Pd package contents:"
+          find "staging/$ADDON" -maxdepth 3 -print
+
+          (cd staging && zip -r "../${ADDON}-pd-composite.zip" "$ADDON")
+          ls -lah "${ADDON}-pd-composite.zip"
+      # TODO: optionally produce a .dek package via the Deken CLI
+      #   (`pip install hexbinder/deken` or fetch upstream tarball).
+      #   The plain zip is enough for v1.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pd-composite
+          path: '*-pd-composite.zip'
+
+  # ---------------- max ----------------
+  max:
+    name: "max (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
+    if: ${{ inputs.max }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15,        os-tag: macos,   arch-tag: arm64  }
+          - { os: windows-latest,  os-tag: windows, arch-tag: x86_64 }
+    steps:
+      - name: Support longpaths
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.longpaths true
+      - uses: maxim-lobanov/setup-xcode@v1
+        if: runner.os == 'macOS'
+        with:
+          xcode-version: '>=16.4'
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: addon
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: brew install jq || true
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: choco install -y jq zip ninja
+      - name: Download OSSIA SDK
+        id: ossia-sdk
+        uses: ossia/actions/download-ossia-sdk@master
+      - name: Configure & build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S addon -B addon/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DAVND_ENABLE_MAX=ON
+          cmake --build addon/build --config Release
+      - name: Package max backend
+        id: package
+        uses: ossia/actions/package-max-addon@master
+        with:
+          addon-name: ${{ github.event.repository.name }}
+          addon-path: addon
+          build-dir: addon/build
+          output-dir: package
+          os-tag: ${{ matrix.os-tag }}
+          arch-tag: ${{ matrix.arch-tag }}
+          macos-certificate-base64: ${{ secrets.MAC_CERT_B64 }}
+          macos-certificate-password: ${{ secrets.MAC_CERT_PASSWORD }}
+          macos-notarize-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          macos-notarize-apple-id: ${{ secrets.APPLE_ID }}
+          macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
+          windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
+          windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: max-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
+          path: ${{ steps.package.outputs.zip-path }}
+
+  # ---------------- max-composite ----------------
+  # Max Packages contain externals/<port>.mxo (macOS bundle) +
+  # externals/<port>.mxe64 (Windows). Both OS binaries live side-by-side in
+  # the same externals/ folder. We unzip every per-OS max artifact, union
+  # externals/ + help/ + extras/ into one staging dir, and re-zip.
+  max-composite:
+    if: ${{ inputs.max }}
+    needs: max
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: max-*
+          merge-multiple: false
+          path: per-os
+      - name: Install zip tools and jq
+        shell: bash
+        run: |
+          sudo apt -y update
+          sudo apt install -yqq zip unzip jq
+      - name: Merge per-OS Max artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          ADDON="${{ github.event.repository.name }}"
+          mkdir -p "staging/$ADDON"/{externals,help,extras}
+
+          shopt -s nullglob
+          ZIPS=( per-os/*/${ADDON}-max-*.zip )
+          if [[ ${#ZIPS[@]} -eq 0 ]]; then
+            echo "Error: no per-OS max artifacts found under per-os/"
+            ls -lR per-os || true
+            exit 1
+          fi
+
+          PKG_INFO_TAKEN=0
+          for z in "${ZIPS[@]}"; do
+            dest="unzipped-$(basename "$z" .zip)"
+            mkdir -p "$dest"
+            unzip -o "$z" -d "$dest"
+
+            SRC="$dest/$ADDON"
+            if [[ ! -d "$SRC" ]]; then
+              echo "Warning: per-OS zip $z had no $ADDON/ root, skipping"
+              rm -rf "$dest"
+              continue
+            fi
+
+            # Union externals/ (preserve .mxo bundle structure with cp -R)
+            if [[ -d "$SRC/externals" ]]; then
+              cp -R "$SRC/externals/." "staging/$ADDON/externals/" 2>/dev/null || true
+            fi
+            # Union help/ and extras/ if present
+            if [[ -d "$SRC/help" ]]; then
+              cp -R "$SRC/help/." "staging/$ADDON/help/" 2>/dev/null || true
+            fi
+            if [[ -d "$SRC/extras" ]]; then
+              cp -R "$SRC/extras/." "staging/$ADDON/extras/" 2>/dev/null || true
+            fi
+            # Take the first package-info.json + LICENSE/README we see
+            if [[ "$PKG_INFO_TAKEN" -eq 0 && -f "$SRC/package-info.json" ]]; then
+              cp -f "$SRC/package-info.json" "staging/$ADDON/"
+              PKG_INFO_TAKEN=1
+            fi
+            for f in LICENSE LICENSE.txt LICENSE.md README README.md README.txt; do
+              if [[ -f "$SRC/$f" && ! -f "staging/$ADDON/$f" ]]; then
+                cp -f "$SRC/$f" "staging/$ADDON/"
+              fi
+            done
+
+            rm -rf "$dest"
+          done
+
+          # Mark composite package as multi-OS in package-info.json
+          if [[ -f "staging/$ADDON/package-info.json" ]] && command -v jq >/dev/null 2>&1; then
+            jq '.os = ["macos","windows"]' "staging/$ADDON/package-info.json" > /tmp/pi.json
+            mv /tmp/pi.json "staging/$ADDON/package-info.json"
+          fi
+
+          echo "Composite Max package contents:"
+          find "staging/$ADDON" -maxdepth 3 -print
+
+          # -y preserves symlinks (matters for .mxo bundles on macOS)
+          (cd staging && zip -ry "../${ADDON}-max-composite.zip" "$ADDON")
+          ls -lah "${ADDON}-max-composite.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: max-composite
+          path: '*-max-composite.zip'
+
+  # ---------------- vst3 ----------------
+  vst3:
+    name: "vst3 (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
+    if: ${{ inputs.vst3 }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04,    os-tag: linux,   arch-tag: x86_64 }
+          - { os: macos-15,        os-tag: macos,   arch-tag: arm64  }
+          - { os: windows-latest,  os-tag: windows, arch-tag: x86_64 }
+    steps:
+      - name: Support longpaths
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.longpaths true
+      - uses: maxim-lobanov/setup-xcode@v1
+        if: runner.os == 'macOS'
+        with:
+          xcode-version: '>=16.4'
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: addon
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt -y update
+          sudo apt install -yqq libgl-dev libx11-dev libxcb1-dev jq zip
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: brew install jq || true
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: choco install -y jq zip ninja
+      - name: Download OSSIA SDK
+        id: ossia-sdk
+        uses: ossia/actions/download-ossia-sdk@master
+      - name: Configure & build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S addon -B addon/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DAVND_ENABLE_VST3=ON
+          cmake --build addon/build --config Release
+      - name: Package vst3 backend
+        id: package
+        uses: ossia/actions/package-vst3-addon@master
+        with:
+          addon-name: ${{ github.event.repository.name }}
+          addon-path: addon
+          build-dir: addon/build
+          output-dir: package
+          os-tag: ${{ matrix.os-tag }}
+          arch-tag: ${{ matrix.arch-tag }}
+          macos-certificate-base64: ${{ secrets.MAC_CERT_B64 }}
+          macos-certificate-password: ${{ secrets.MAC_CERT_PASSWORD }}
+          macos-notarize-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          macos-notarize-apple-id: ${{ secrets.APPLE_ID }}
+          macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
+          windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
+          windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vst3-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
+          path: ${{ steps.package.outputs.zip-path }}
+
+  # ---------------- clap ----------------
+  clap:
+    name: "clap (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
+    if: ${{ inputs.clap }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04,    os-tag: linux,   arch-tag: x86_64 }
+          - { os: macos-15,        os-tag: macos,   arch-tag: arm64  }
+          - { os: windows-latest,  os-tag: windows, arch-tag: x86_64 }
+    steps:
+      - name: Support longpaths
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.longpaths true
+      - uses: maxim-lobanov/setup-xcode@v1
+        if: runner.os == 'macOS'
+        with:
+          xcode-version: '>=16.4'
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: addon
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt -y update
+          sudo apt install -yqq libgl-dev libx11-dev jq zip
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: brew install jq || true
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: choco install -y jq zip ninja
+      - name: Download OSSIA SDK
+        id: ossia-sdk
+        uses: ossia/actions/download-ossia-sdk@master
+      - name: Configure & build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S addon -B addon/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DAVND_ENABLE_CLAP=ON
+          cmake --build addon/build --config Release
+      - name: Package clap backend
+        id: package
+        uses: ossia/actions/package-clap-addon@master
+        with:
+          addon-name: ${{ github.event.repository.name }}
+          addon-path: addon
+          build-dir: addon/build
+          output-dir: package
+          os-tag: ${{ matrix.os-tag }}
+          arch-tag: ${{ matrix.arch-tag }}
+          macos-certificate-base64: ${{ secrets.MAC_CERT_B64 }}
+          macos-certificate-password: ${{ secrets.MAC_CERT_PASSWORD }}
+          macos-notarize-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          macos-notarize-apple-id: ${{ secrets.APPLE_ID }}
+          macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
+          windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
+          windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clap-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
+          path: ${{ steps.package.outputs.zip-path }}
+
+  # ---------------- vintage ----------------
+  vintage:
+    name: "vintage (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
+    if: ${{ inputs.vintage }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15,        os-tag: macos,   arch-tag: arm64  }
+          - { os: windows-latest,  os-tag: windows, arch-tag: x86_64 }
+    steps:
+      - name: Support longpaths
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.longpaths true
+      - uses: maxim-lobanov/setup-xcode@v1
+        if: runner.os == 'macOS'
+        with:
+          xcode-version: '>=16.4'
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: addon
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: brew install jq || true
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: choco install -y jq zip ninja
+      - name: Download OSSIA SDK
+        id: ossia-sdk
+        uses: ossia/actions/download-ossia-sdk@master
+      - name: Configure & build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S addon -B addon/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DAVND_ENABLE_VINTAGE=ON
+          cmake --build addon/build --config Release
+      - name: Package vintage backend
+        id: package
+        uses: ossia/actions/package-vintage-addon@master
+        with:
+          addon-name: ${{ github.event.repository.name }}
+          addon-path: addon
+          build-dir: addon/build
+          output-dir: package
+          os-tag: ${{ matrix.os-tag }}
+          arch-tag: ${{ matrix.arch-tag }}
+          macos-certificate-base64: ${{ secrets.MAC_CERT_B64 }}
+          macos-certificate-password: ${{ secrets.MAC_CERT_PASSWORD }}
+          macos-notarize-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          macos-notarize-apple-id: ${{ secrets.APPLE_ID }}
+          macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
+          windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
+          windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vintage-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
+          path: ${{ steps.package.outputs.zip-path }}
+
+  # ---------------- touchdesigner ----------------
+  touchdesigner:
+    name: "touchdesigner (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
+    if: ${{ inputs.touchdesigner }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15,        os-tag: macos,   arch-tag: arm64  }
+          - { os: windows-latest,  os-tag: windows, arch-tag: x86_64 }
+    steps:
+      - name: Support longpaths
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.longpaths true
+      - uses: maxim-lobanov/setup-xcode@v1
+        if: runner.os == 'macOS'
+        with:
+          xcode-version: '>=16.4'
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: addon
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: brew install jq || true
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: choco install -y jq zip ninja
+      - name: Download OSSIA SDK
+        id: ossia-sdk
+        uses: ossia/actions/download-ossia-sdk@master
+      - name: Configure & build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S addon -B addon/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DAVND_ENABLE_TOUCHDESIGNER=ON
+          cmake --build addon/build --config Release
+      - name: Package touchdesigner backend
+        id: package
+        uses: ossia/actions/package-touchdesigner-addon@master
+        with:
+          addon-name: ${{ github.event.repository.name }}
+          addon-path: addon
+          build-dir: addon/build
+          output-dir: package
+          os-tag: ${{ matrix.os-tag }}
+          arch-tag: ${{ matrix.arch-tag }}
+          macos-certificate-base64: ${{ secrets.MAC_CERT_B64 }}
+          macos-certificate-password: ${{ secrets.MAC_CERT_PASSWORD }}
+          macos-notarize-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          macos-notarize-apple-id: ${{ secrets.APPLE_ID }}
+          macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
+          windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
+          windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: touchdesigner-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
+          path: ${{ steps.package.outputs.zip-path }}
+
+  # ---------------- python ----------------
+  python:
+    name: "python (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
+    if: ${{ inputs.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04,    os-tag: linux,   arch-tag: x86_64 }
+          - { os: macos-15,        os-tag: macos,   arch-tag: arm64  }
+          - { os: windows-latest,  os-tag: windows, arch-tag: x86_64 }
+    steps:
+      - name: Support longpaths
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.longpaths true
+      - uses: maxim-lobanov/setup-xcode@v1
+        if: runner.os == 'macOS'
+        with:
+          xcode-version: '>=16.4'
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: addon
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt -y update
+          sudo apt install -yqq python3-dev jq zip
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: brew install jq || true
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: choco install -y jq zip ninja
+      - name: Download OSSIA SDK
+        id: ossia-sdk
+        uses: ossia/actions/download-ossia-sdk@master
+      - name: Configure & build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S addon -B addon/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DAVND_ENABLE_PYTHON=ON
+          cmake --build addon/build --config Release
+      - name: Package python backend
+        id: package
+        uses: ossia/actions/package-python-addon@master
+        with:
+          addon-name: ${{ github.event.repository.name }}
+          addon-path: addon
+          build-dir: addon/build
+          output-dir: package
+          os-tag: ${{ matrix.os-tag }}
+          arch-tag: ${{ matrix.arch-tag }}
+          macos-certificate-base64: ${{ secrets.MAC_CERT_B64 }}
+          macos-certificate-password: ${{ secrets.MAC_CERT_PASSWORD }}
+          macos-notarize-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          macos-notarize-apple-id: ${{ secrets.APPLE_ID }}
+          macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
+          windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
+          windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
+          path: ${{ steps.package.outputs.zip-path }}
+
+  # ---------------- godot ----------------
+  godot:
+    name: "godot (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
+    if: ${{ inputs.godot }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04,    os-tag: linux,   arch-tag: x86_64 }
+          - { os: macos-15,        os-tag: macos,   arch-tag: arm64  }
+          - { os: windows-latest,  os-tag: windows, arch-tag: x86_64 }
+    steps:
+      - name: Support longpaths
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.longpaths true
+      - uses: maxim-lobanov/setup-xcode@v1
+        if: runner.os == 'macOS'
+        with:
+          xcode-version: '>=16.4'
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: addon
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt -y update
+          sudo apt install -yqq libgl-dev jq zip
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: brew install jq || true
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: choco install -y jq zip ninja
+      - name: Download OSSIA SDK
+        id: ossia-sdk
+        uses: ossia/actions/download-ossia-sdk@master
+      - name: Configure & build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S addon -B addon/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DAVND_ENABLE_GODOT=ON
+          cmake --build addon/build --config Release
+      - name: Package godot backend
+        id: package
+        uses: ossia/actions/package-godot-addon@master
+        with:
+          addon-name: ${{ github.event.repository.name }}
+          addon-path: addon
+          build-dir: addon/build
+          output-dir: package
+          os-tag: ${{ matrix.os-tag }}
+          arch-tag: ${{ matrix.arch-tag }}
+          macos-certificate-base64: ${{ secrets.MAC_CERT_B64 }}
+          macos-certificate-password: ${{ secrets.MAC_CERT_PASSWORD }}
+          macos-notarize-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          macos-notarize-apple-id: ${{ secrets.APPLE_ID }}
+          macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
+          windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
+          windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: godot-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
+          path: ${{ steps.package.outputs.zip-path }}
+
+  # ---------------- godot-composite ----------------
+  # Godot expects a single addons/<name>/ folder containing the
+  # .gdextension config(s) plus a per-platform `bin/<os>-<arch>/` dir.
+  # Each per-OS zip already lays this out for one platform; we union them.
+  # The .gdextension files reference all platforms regardless, so taking
+  # any one of them is fine.
+  godot-composite:
+    if: ${{ inputs.godot }}
+    needs: godot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: godot-*
+          merge-multiple: false
+          path: per-os
+      - name: Install zip tools
+        shell: bash
+        run: |
+          sudo apt -y update
+          sudo apt install -yqq zip unzip
+      - name: Merge per-OS Godot artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          ADDON="${{ github.event.repository.name }}"
+          mkdir -p "staging/addons/$ADDON/bin"
+
+          shopt -s nullglob
+          ZIPS=( per-os/*/${ADDON}-godot-*.zip )
+          if [[ ${#ZIPS[@]} -eq 0 ]]; then
+            echo "Error: no per-OS godot artifacts found under per-os/"
+            ls -lR per-os || true
+            exit 1
+          fi
+
+          GDEXT_TAKEN=0
+          for z in "${ZIPS[@]}"; do
+            dest="unzipped-$(basename "$z" .zip)"
+            mkdir -p "$dest"
+            unzip -o "$z" -d "$dest"
+
+            SRC="$dest/$ADDON"
+            if [[ ! -d "$SRC" ]]; then
+              echo "Warning: per-OS zip $z had no $ADDON/ root, skipping"
+              rm -rf "$dest"
+              continue
+            fi
+
+            # Take .gdextension config files from the first zip only.
+            # All per-OS zips emit identical .gdextension content (rewritten
+            # to point at bin/<os>-<arch>/...) — taking one is enough.
+            if [[ "$GDEXT_TAKEN" -eq 0 ]]; then
+              while IFS= read -r -d '' cfg; do
+                cp -f "$cfg" "staging/addons/$ADDON/"
+              done < <(find "$SRC" -maxdepth 1 -type f -name '*.gdextension' -print0)
+              # Also copy LICENSE/README from the first zip if present
+              for f in LICENSE LICENSE.txt LICENSE.md README README.md README.txt; do
+                if [[ -f "$SRC/$f" ]]; then
+                  cp -f "$SRC/$f" "staging/addons/$ADDON/"
+                fi
+              done
+              GDEXT_TAKEN=1
+            fi
+
+            # Union all bin/<os>-<arch>/ folders (each per-OS zip contributes one)
+            if [[ -d "$SRC/bin" ]]; then
+              cp -R "$SRC/bin/." "staging/addons/$ADDON/bin/" 2>/dev/null || true
+            fi
+
+            rm -rf "$dest"
+          done
+
+          echo "Composite Godot package contents:"
+          find "staging/addons/$ADDON" -maxdepth 4 -print
+
+          (cd staging && zip -r "../${ADDON}-godot-composite.zip" "addons")
+          ls -lah "${ADDON}-godot-composite.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: godot-composite
+          path: '*-godot-composite.zip'
+
+  # ---------------- standalone ----------------
+  standalone:
+    name: "standalone (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
+    if: ${{ inputs.standalone }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04,    os-tag: linux,   arch-tag: x86_64 }
+          - { os: macos-15,        os-tag: macos,   arch-tag: arm64  }
+          - { os: windows-latest,  os-tag: windows, arch-tag: x86_64 }
+    steps:
+      - name: Support longpaths
+        if: runner.os == 'Windows'
+        shell: bash
+        run: git config --global core.longpaths true
+      - uses: maxim-lobanov/setup-xcode@v1
+        if: runner.os == 'macOS'
+        with:
+          xcode-version: '>=16.4'
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: addon
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt -y update
+          sudo apt install -yqq libgl-dev libx11-dev jq zip
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: brew install jq || true
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: choco install -y jq zip ninja
+      - name: Download OSSIA SDK
+        id: ossia-sdk
+        uses: ossia/actions/download-ossia-sdk@master
+      - name: Configure & build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S addon -B addon/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DAVND_ENABLE_STANDALONE=ON
+          cmake --build addon/build --config Release
+      - name: Package standalone backend
+        id: package
+        uses: ossia/actions/package-standalone-addon@master
+        with:
+          addon-name: ${{ github.event.repository.name }}
+          addon-path: addon
+          build-dir: addon/build
+          output-dir: package
+          os-tag: ${{ matrix.os-tag }}
+          arch-tag: ${{ matrix.arch-tag }}
+          macos-certificate-base64: ${{ secrets.MAC_CERT_B64 }}
+          macos-certificate-password: ${{ secrets.MAC_CERT_PASSWORD }}
+          macos-notarize-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          macos-notarize-apple-id: ${{ secrets.APPLE_ID }}
+          macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
+          windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
+          windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: standalone-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
+          path: ${{ steps.package.outputs.zip-path }}
+
+  # ---------------- gstreamer ----------------
+  gstreamer:
+    name: "gstreamer (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
+    if: ${{ inputs.gstreamer }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04,    os-tag: linux,   arch-tag: x86_64 }
+          - { os: macos-15,        os-tag: macos,   arch-tag: arm64  }
+    steps:
+      - uses: maxim-lobanov/setup-xcode@v1
+        if: runner.os == 'macOS'
+        with:
+          xcode-version: '>=16.4'
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: addon
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt -y update
+          sudo apt install -yqq libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev jq zip
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: brew install gstreamer gst-plugins-base jq || true
+      - name: Download OSSIA SDK
+        id: ossia-sdk
+        uses: ossia/actions/download-ossia-sdk@master
+      - name: Configure & build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S addon -B addon/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DAVND_ENABLE_GSTREAMER=ON
+          cmake --build addon/build --config Release
+      - name: Package gstreamer backend
+        id: package
+        uses: ossia/actions/package-gstreamer-addon@master
+        with:
+          addon-name: ${{ github.event.repository.name }}
+          addon-path: addon
+          build-dir: addon/build
+          output-dir: package
+          os-tag: ${{ matrix.os-tag }}
+          arch-tag: ${{ matrix.arch-tag }}
+          macos-certificate-base64: ${{ secrets.MAC_CERT_B64 }}
+          macos-certificate-password: ${{ secrets.MAC_CERT_PASSWORD }}
+          macos-notarize-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          macos-notarize-apple-id: ${{ secrets.APPLE_ID }}
+          macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gstreamer-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
+          path: ${{ steps.package.outputs.zip-path }}
+
+  # ---------------- wasm ----------------
+  wasm:
+    name: "wasm (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
+    if: ${{ inputs.wasm }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, os-tag: linux, arch-tag: x86_64 }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: addon
+      - name: Install dependencies (Linux)
+        shell: bash
+        run: |
+          sudo apt -y update
+          sudo apt install -yqq jq zip
+      - name: Setup emsdk
+        uses: mymindstorm/setup-emsdk@v14
+      - name: Download OSSIA SDK
+        id: ossia-sdk
+        uses: ossia/actions/download-ossia-sdk@master
+      - name: Configure & build
+        shell: bash
+        run: |
+          set -euo pipefail
+          emcmake cmake -S addon -B addon/build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DAVND_ENABLE_WASM=ON
+          cmake --build addon/build --config Release
+      - name: Package wasm backend
+        id: package
+        uses: ossia/actions/package-wasm-addon@master
+        with:
+          addon-name: ${{ github.event.repository.name }}
+          addon-path: addon
+          build-dir: addon/build
+          output-dir: package
+          os-tag: ${{ matrix.os-tag }}
+          arch-tag: ${{ matrix.arch-tag }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
+          path: ${{ steps.package.outputs.zip-path }}
+
+  # ---------------- release-continuous ----------------
+  release-continuous:
+    name: Publish continuous release
+    needs: [pd, max, vst3, clap, vintage, touchdesigner, python, godot, standalone, gstreamer, wasm, pd-composite, max-composite, godot-composite]
+    if: always() && github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout (for tag setup)
+        uses: actions/checkout@v4
+
+      - name: Download all backend artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: incoming
+
+      - name: Flatten artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # actions/download-artifact@v4 creates one dir per artifact; each dir
+          # contains exactly one *.zip. Flatten them all into dist/.
+          find incoming -type f -name '*.zip' -exec cp -v {} dist/ \;
+          echo "Final release payload:"
+          ls -lah dist/
+
+      - name: Recreate the 'continuous' release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # upload-release-action below handles re-uploading assets to an
+          # existing tag, but a moving tag with stale assets sometimes confuses
+          # GitHub's release UI. Delete the release (but keep the tag floating)
+          # before uploading, then svenstaro/upload-release-action will create
+          # a fresh prerelease with the correct sha as target.
+          if gh release view continuous >/dev/null 2>&1; then
+            gh release delete continuous --yes --cleanup-tag || \
+              gh release delete continuous --yes || true
+          fi
+
+      - name: Upload to continuous prerelease
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          tag: continuous
+          prerelease: true
+          overwrite: true
+          file_glob: true
+          file: dist/*.zip
+          target_commit: ${{ github.sha }}
+          body: |
+            Continuous build from ${{ github.sha }}
+            Built: ${{ github.event.head_commit.timestamp }}

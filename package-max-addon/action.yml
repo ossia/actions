@@ -1,0 +1,323 @@
+name: 'Package avendish Max Addon'
+description: 'Packages an avendish-built Max/MSP external as a Max Package (.mxo/.mxe64), signs/notarizes when secrets are set, and zips it.'
+inputs:
+  addon-name:
+    description: 'Name of the addon (used as folder & zip prefix)'
+    required: true
+  addon-path:
+    description: 'Path to addon source root (LICENSE/README, optional help/ directory, optional package-info.json live here)'
+    required: false
+    default: '.'
+  build-dir:
+    description: 'Directory where avendish wrote the per-backend output (Max externals expected under <build-dir>/max/)'
+    required: false
+    default: 'build'
+  output-dir:
+    description: 'Directory where the packaged zip will be written'
+    required: false
+    default: 'package'
+  os-tag:
+    description: 'OS tag used in artifact name: linux | macos | windows'
+    required: true
+  arch-tag:
+    description: 'Architecture tag used in artifact name: x86_64 | arm64'
+    required: true
+  macos-certificate-base64:
+    description: 'Base64-encoded P12 certificate for macOS code signing (optional)'
+    required: false
+    default: ''
+  macos-certificate-password:
+    description: 'Password for macOS P12 certificate (optional)'
+    required: false
+    default: ''
+  macos-notarize-team-id:
+    description: 'Apple Developer Team ID for notarization (optional)'
+    required: false
+    default: ''
+  macos-notarize-apple-id:
+    description: 'Apple ID for notarization (optional)'
+    required: false
+    default: ''
+  macos-notarize-password:
+    description: 'App-specific password for notarization (optional)'
+    required: false
+    default: ''
+  windows-certificate-base64:
+    description: 'Base64-encoded PFX certificate for Windows code signing (optional)'
+    required: false
+    default: ''
+  windows-certificate-password:
+    description: 'Password for Windows PFX certificate (optional)'
+    required: false
+    default: ''
+
+outputs:
+  zip-path:
+    description: 'Absolute path to the produced zip file'
+    value: ${{ steps.zip.outputs.zip-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Prepare paths
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "${{ inputs.output-dir }}"
+        OUTPUT_DIR="$(cd "${{ inputs.output-dir }}" && pwd)"
+        PKG_DIR="$OUTPUT_DIR/${{ inputs.addon-name }}"
+        rm -rf "$PKG_DIR"
+        mkdir -p "$PKG_DIR/externals"
+        ZIP_NAME="${{ inputs.addon-name }}-max-${{ inputs.os-tag }}-${{ inputs.arch-tag }}.zip"
+        ZIP_PATH="$OUTPUT_DIR/$ZIP_NAME"
+        echo "OUTPUT_DIR=$OUTPUT_DIR" >> "$GITHUB_ENV"
+        echo "PKG_DIR=$PKG_DIR" >> "$GITHUB_ENV"
+        echo "EXT_DIR=$PKG_DIR/externals" >> "$GITHUB_ENV"
+        echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+        echo "ZIP_PATH=$ZIP_PATH" >> "$GITHUB_ENV"
+
+    - name: Collect Max externals
+      shell: bash
+      run: |
+        set -euo pipefail
+        MAX_DIR="${{ inputs.build-dir }}/max"
+        if [[ ! -d "$MAX_DIR" ]]; then
+          echo "Error: Max build output directory '$MAX_DIR' does not exist"
+          exit 1
+        fi
+
+        FOUND=0
+        case "${{ inputs.os-tag }}" in
+          macos)
+            # .mxo bundles are directories — must use cp -R and preserve structure
+            while IFS= read -r -d '' bundle; do
+              echo "Copying Max bundle: $bundle"
+              cp -R "$bundle" "$EXT_DIR/"
+              FOUND=$((FOUND + 1))
+            done < <(find "$MAX_DIR" -maxdepth 2 -type d -name '*.mxo' -print0)
+            ;;
+          windows)
+            # avendish emits .mxe64 on 64-bit Windows and .mxe on 32-bit Windows.
+            while IFS= read -r -d '' f; do
+              echo "Copying Max external: $f"
+              cp -f "$f" "$EXT_DIR/"
+              FOUND=$((FOUND + 1))
+            done < <(find "$MAX_DIR" -maxdepth 2 -type f \( -name '*.mxe64' -o -name '*.mxe' \) -print0)
+            ;;
+          linux)
+            # Max has no official Linux runtime; still ship anything present so users can inspect.
+            while IFS= read -r -d '' f; do
+              echo "Copying Max external (linux best-effort): $f"
+              cp -f "$f" "$EXT_DIR/"
+              FOUND=$((FOUND + 1))
+            done < <(find "$MAX_DIR" -maxdepth 2 -type f \( -name '*.mxo' -o -name '*.so' -o -name '*.mxe64' \) -print0)
+            ;;
+          *)
+            echo "Error: unsupported os-tag '${{ inputs.os-tag }}'"
+            exit 1
+            ;;
+        esac
+
+        if [[ "$FOUND" -eq 0 ]]; then
+          echo "Error: no Max externals found under '$MAX_DIR' for os-tag=${{ inputs.os-tag }}"
+          exit 1
+        fi
+        echo "Collected $FOUND Max external(s)."
+
+    - name: Collect maxref.xml docs
+      shell: bash
+      run: |
+        set -euo pipefail
+        # avendish auto-generates *.maxref.xml next to the externals.
+        # Best-effort: copy them into <addon>/docs/refpages/ if any are present.
+        MAX_DIR="${{ inputs.build-dir }}/max"
+        shopt -s nullglob
+        REFS=( "$MAX_DIR"/*.maxref.xml )
+        if [[ ${#REFS[@]} -eq 0 ]]; then
+          # Also probe one level deeper, mirroring the externals search.
+          mapfile -d '' REFS < <(find "$MAX_DIR" -maxdepth 2 -type f -name '*.maxref.xml' -print0 2>/dev/null || true)
+        fi
+        if [[ ${#REFS[@]} -gt 0 ]]; then
+          mkdir -p "$PKG_DIR/docs/refpages"
+          for f in "${REFS[@]}"; do
+            [[ -z "$f" ]] && continue
+            echo "Copying maxref: $f"
+            cp -f "$f" "$PKG_DIR/docs/refpages/"
+          done
+        else
+          echo "No *.maxref.xml files under $MAX_DIR — skipping refpages."
+        fi
+
+    - name: Copy help patches
+      shell: bash
+      run: |
+        set -euo pipefail
+        HELP_SRC="${{ inputs.addon-path }}/help"
+        if [[ -d "$HELP_SRC" ]]; then
+          shopt -s nullglob
+          HELPS=( "$HELP_SRC"/*.maxhelp )
+          if [[ ${#HELPS[@]} -gt 0 ]]; then
+            mkdir -p "$PKG_DIR/help"
+            for f in "${HELPS[@]}"; do
+              echo "Copying help patch: $f"
+              cp -f "$f" "$PKG_DIR/help/"
+            done
+          else
+            echo "No .maxhelp patches under $HELP_SRC."
+          fi
+        else
+          echo "No help/ directory at $HELP_SRC — skipping help patches."
+        fi
+
+    - name: Always-on extras directory
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$PKG_DIR/extras"
+
+    - name: Copy or synthesize package-info.json
+      shell: bash
+      run: |
+        set -euo pipefail
+        PKG_INFO_SRC="${{ inputs.addon-path }}/package-info.json"
+        PKG_INFO_DST="$PKG_DIR/package-info.json"
+        if [[ -f "$PKG_INFO_SRC" ]]; then
+          echo "Copying provided package-info.json"
+          cp -f "$PKG_INFO_SRC" "$PKG_INFO_DST"
+        else
+          echo "Synthesizing minimal package-info.json"
+          cat > "$PKG_INFO_DST" <<EOF
+        {
+          "name": "${{ inputs.addon-name }}",
+          "displayname": "${{ inputs.addon-name }}",
+          "version": "continuous",
+          "author": "ossia.io",
+          "description": "Built from avendish — see https://github.com/celtera/avendish",
+          "homepatcher": ""
+        }
+        EOF
+        fi
+
+    - name: Copy LICENSE/README
+      shell: bash
+      run: |
+        set -euo pipefail
+        for f in LICENSE LICENSE.txt LICENSE.md README README.md README.txt; do
+          SRC="${{ inputs.addon-path }}/$f"
+          if [[ -f "$SRC" ]]; then
+            echo "Copying $SRC"
+            cp -f "$SRC" "$PKG_DIR/"
+          fi
+        done
+
+    # --- macOS signing & notarization (inline pattern) ---
+    - name: Import macOS code signing certificate
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != ''
+      uses: jcelerier/import-codesign-certs@master
+      with:
+        p12-file-base64: ${{ inputs.macos-certificate-base64 }}
+        p12-password: ${{ inputs.macos-certificate-password }}
+
+    - name: Sign .mxo bundles (macOS)
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        shopt -s nullglob
+        BUNDLES=( "$EXT_DIR"/*.mxo )
+        if [[ ${#BUNDLES[@]} -eq 0 ]]; then
+          echo "No .mxo bundles to sign."
+          exit 0
+        fi
+        for bundle in "${BUNDLES[@]}"; do
+          echo "Signing $bundle"
+          codesign --deep --force --options runtime --timestamp --sign "ossia.io" "$bundle"
+          codesign --verify --verbose "$bundle" || true
+        done
+
+    - name: Notarize .mxo bundles (macOS)
+      if: runner.os == 'macOS' && inputs.macos-certificate-base64 != '' && inputs.macos-notarize-team-id != '' && inputs.macos-notarize-apple-id != '' && inputs.macos-notarize-password != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        shopt -s nullglob
+        BUNDLES=( "$EXT_DIR"/*.mxo )
+        if [[ ${#BUNDLES[@]} -eq 0 ]]; then
+          echo "No .mxo bundles to notarize."
+          exit 0
+        fi
+        for bundle in "${BUNDLES[@]}"; do
+          NOTARIZE_ZIP="${bundle}.notarize.zip"
+          echo "Zipping $bundle for notarization → $NOTARIZE_ZIP"
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$bundle" "$NOTARIZE_ZIP"
+          echo "Submitting $NOTARIZE_ZIP to notarytool"
+          xcrun notarytool submit "$NOTARIZE_ZIP" \
+            --team-id "${{ inputs.macos-notarize-team-id }}" \
+            --apple-id "${{ inputs.macos-notarize-apple-id }}" \
+            --password "${{ inputs.macos-notarize-password }}" \
+            --wait
+          echo "Stapling $bundle"
+          xcrun stapler staple "$bundle"
+          rm -f "$NOTARIZE_ZIP"
+        done
+
+    # --- Windows signing (inline pattern) ---
+    - name: Sign Windows .mxe64 externals
+      if: runner.os == 'Windows' && inputs.windows-certificate-base64 != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        PFX="$RUNNER_TEMP/win-codesign.pfx"
+        echo "${{ inputs.windows-certificate-base64 }}" | base64 -d > "$PFX"
+
+        # Locate signtool.exe (it lives under Program Files (x86)/Windows Kits/10/bin/<ver>/x64)
+        SIGNTOOL=""
+        if command -v signtool >/dev/null 2>&1; then
+          SIGNTOOL="signtool"
+        else
+          CANDIDATE=$(find "/c/Program Files (x86)/Windows Kits/10/bin" -name signtool.exe 2>/dev/null | grep '/x64/' | sort -r | head -n1 || true)
+          if [[ -z "$CANDIDATE" ]]; then
+            CANDIDATE=$(find "/c/Program Files (x86)/Windows Kits/10/bin" -name signtool.exe 2>/dev/null | sort -r | head -n1 || true)
+          fi
+          if [[ -n "$CANDIDATE" ]]; then
+            SIGNTOOL="$CANDIDATE"
+          fi
+        fi
+        if [[ -z "$SIGNTOOL" ]]; then
+          echo "Error: signtool not found"
+          exit 1
+        fi
+        echo "Using signtool: $SIGNTOOL"
+
+        shopt -s nullglob
+        for f in "$EXT_DIR"/*.mxe64; do
+          echo "Signing $f"
+          "$SIGNTOOL" sign /f "$PFX" /p "${{ inputs.windows-certificate-password }}" \
+            /tr http://timestamp.digicert.com /td sha256 /fd sha256 "$f"
+        done
+        rm -f "$PFX"
+
+    - name: Display package contents
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "Package layout for $PKG_DIR:"
+        find "$PKG_DIR" -maxdepth 3 -mindepth 1 -print
+
+    - name: Create zip
+      id: zip
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd "$OUTPUT_DIR"
+        rm -f "$ZIP_PATH"
+        if command -v zip >/dev/null 2>&1; then
+          # -y preserves symlinks (matters for .mxo bundles on macOS)
+          zip -ry "$ZIP_NAME" "${{ inputs.addon-name }}"
+        elif command -v 7z >/dev/null 2>&1; then
+          7z a -tzip "$ZIP_NAME" "${{ inputs.addon-name }}"
+        else
+          powershell -NoProfile -Command "Compress-Archive -Path '${{ inputs.addon-name }}' -DestinationPath '$ZIP_NAME' -Force"
+        fi
+        echo "Created zip: $ZIP_PATH"
+        echo "zip-path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
