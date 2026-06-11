@@ -33,6 +33,11 @@ jobs:
           version: "${{ matrix.version }}"
           extract-path: "./sdk"
 
+      # Runtime libs the score AppImage expects from the system.
+      - name: Install runtime dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libv4l-0
+
       - name: JIT compile test
         uses: ossia/actions/jit-compile@master
         with:
