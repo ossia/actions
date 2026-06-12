@@ -1,0 +1,576 @@
+# Avendish portability CI - reusable workflow
+#
+# Smoke-build an avendish-based addon as plain C++ across an extended
+# platform matrix - from desktop GCC to ESP32 - to confirm the addon's
+# headers compile under everything that has a C++23 compiler. Avendish
+# addons are "plain C++ classes with introspection", so portability is a
+# correctness property worth gating in CI.
+#
+# The build target is avendish's `dump` backend: a minimal introspection
+# executable produced via `avnd_make_dump` that links nothing
+# platform-specific. For each enabled lane, this workflow configures the
+# addon with `-DAVND_BUILD_PORTABILITY=ON -DAVND_DISABLE_DEFAULT_BACKENDS=ON`
+# and builds `dump_<addon-name>` - that's it, no packaging, no upload, no
+# test execution. A failed compile fails the job.
+#
+# Usage in a caller repository (.github/workflows/builds.yaml):
+#
+#   name: Portability
+#   on:
+#     push:
+#       branches: [main, master]
+#     pull_request:
+#   concurrency:
+#     group: ${{ github.workflow }}-portability-${{ github.ref }}
+#     cancel-in-progress: true
+#   jobs:
+#     portability:
+#       uses: ossia/actions/.github/workflows/avnd-portability.yml@master
+#       with:
+#         # All lanes default to true; flip individual ones off for addons
+#         # that are unredeemably platform-specific.
+#         esp32: false
+#         ios: false
+#
+# Inputs (all booleans, default true - opt-out semantics):
+#   linux_gcc       Ubuntu gcc-13 + gcc-14 with ASan/UBSan/_GLIBCXX_DEBUG
+#   linux_clang     Ubuntu clang-20 with libstdc++ + libc++, sanitizers
+#   macos           macos-15 (arm64) + macos-latest, AppleClang
+#   windows_msvc    windows-latest (x86_64) + windows-11-arm (arm64)
+#   windows_mingw   mingw-w64 cross from ubuntu-24.04
+#   freebsd         vmactions/freebsd-vm
+#   wasm            emscripten via mymindstorm/setup-emsdk
+#   android         android-actions/setup-android with NDK r26+
+#   ios             iOS cross-compile via Xcode on macos-15
+#   esp32           arduino-cli + esp32:esp32 core (TinyPICO/XIAO/M5StickC/...)
+#   rp2040          arduino-cli + rp2040:rp2040 (Earle Philhower) core
+#
+# Notes:
+#   - ESP32 / RP2040 lanes require the addon to ship example *.ino sketches
+#     under `examples/` - without them, those jobs skip with a warning
+#     instead of failing.
+#   - This workflow produces no artifacts: it is a compile-only smoke test.
+#     Pair it with `avnd-addon.yml` (which handles real backend packaging)
+#     in your `builds.yaml`.
+
+name: Avendish portability CI
+
+on:
+  workflow_call:
+    inputs:
+      linux_gcc:
+        description: 'Build on Ubuntu with gcc-13 + gcc-14 (ASan/UBSan)'
+        required: false
+        type: boolean
+        default: true
+      linux_clang:
+        description: 'Build on Ubuntu with clang-20 (libstdc++ + libc++, sanitizers)'
+        required: false
+        type: boolean
+        default: true
+      macos:
+        description: 'Build on macOS (macos-15 arm64 + macos-latest)'
+        required: false
+        type: boolean
+        default: true
+      windows_msvc:
+        description: 'Build on Windows with MSVC (x86_64 + arm64)'
+        required: false
+        type: boolean
+        default: true
+      windows_mingw:
+        description: 'Cross-build for Windows via mingw-w64 from Ubuntu'
+        required: false
+        type: boolean
+        default: true
+      freebsd:
+        description: 'Build on FreeBSD via vmactions/freebsd-vm'
+        required: false
+        type: boolean
+        default: true
+      wasm:
+        description: 'Build for WebAssembly via emscripten'
+        required: false
+        type: boolean
+        default: true
+      android:
+        description: 'Cross-build for Android (arm64-v8a) via NDK'
+        required: false
+        type: boolean
+        default: true
+      ios:
+        description: 'Cross-build for iOS via Xcode'
+        required: false
+        type: boolean
+        default: true
+      esp32:
+        description: 'Compile examples/*.ino for ESP32 boards via arduino-cli'
+        required: false
+        type: boolean
+        default: true
+      rp2040:
+        description: 'Compile examples/*.ino for RP2040/RP2350 via arduino-cli'
+        required: false
+        type: boolean
+        default: true
+
+# Shared anchors are not supported in GitHub Actions YAML; the per-platform
+# jobs below are intentionally near-identical and mostly differ only in the
+# toolchain install + the CMake configure flags.
+#
+# CMake invocation convention (uppercase):
+#   cmake -S . -B build \
+#     -DAVND_BUILD_PORTABILITY=ON \
+#     -DAVND_DISABLE_DEFAULT_BACKENDS=ON
+#   cmake --build build --target dump_${addon} -j 4
+# TODO: align CMake target name with avendish convention once finalized.
+
+jobs:
+  # ---------------- linux_gcc ----------------
+  linux_gcc:
+    name: "linux gcc (${{ matrix.compiler }})"
+    if: ${{ inputs.linux_gcc }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { compiler: g++-13, pkg: g++-13 }
+          - { compiler: g++-14, pkg: g++-14 }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install dependencies
+        shell: bash
+        run: |
+          sudo apt -y update
+          sudo apt install -yqq cmake ninja-build ${{ matrix.pkg }}
+      # TODO: align CMake target name with avendish convention once finalized
+      - name: Configure & build dump target
+        shell: bash
+        run: |
+          set -euo pipefail
+          ADDON="${{ github.event.repository.name }}"
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+            -DAVND_BUILD_PORTABILITY=ON \
+            -DAVND_DISABLE_DEFAULT_BACKENDS=ON \
+            -DCMAKE_CXX_FLAGS="-Werror=return-type -fsanitize=address -fsanitize=undefined -D_GLIBCXX_DEBUG=1 -D_GLIBCXX_DEBUG_PEDANTIC=1 -D_GLIBCXX_ASSERTIONS=1"
+          cmake --build build --target "dump_${ADDON}" -j 4
+
+  # ---------------- linux_clang ----------------
+  linux_clang:
+    name: "linux clang (${{ matrix.stdlib }})"
+    if: ${{ inputs.linux_clang }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { stdlib: libstdc++, extra_flags: "" }
+          - { stdlib: libc++,    extra_flags: "-stdlib=libc++" }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install clang-20 via apt.llvm.org
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt -y update
+          sudo apt install -yqq wget gnupg cmake ninja-build
+          wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 20
+          if [[ "${{ matrix.stdlib }}" == "libc++" ]]; then
+            sudo apt install -yqq libc++-20-dev libc++abi-20-dev
+          fi
+      # TODO: align CMake target name with avendish convention once finalized
+      - name: Configure & build dump target
+        shell: bash
+        run: |
+          set -euo pipefail
+          ADDON="${{ github.event.repository.name }}"
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_COMPILER=clang++-20 \
+            -DAVND_BUILD_PORTABILITY=ON \
+            -DAVND_DISABLE_DEFAULT_BACKENDS=ON \
+            -DCMAKE_CXX_FLAGS="${{ matrix.extra_flags }} -Werror=return-type -fsanitize=address -fsanitize=undefined -D_GLIBCXX_DEBUG=1 -D_GLIBCXX_DEBUG_PEDANTIC=1 -D_GLIBCXX_ASSERTIONS=1"
+          cmake --build build --target "dump_${ADDON}" -j 4
+
+  # ---------------- macos ----------------
+  macos:
+    name: "macos (${{ matrix.os }})"
+    if: ${{ inputs.macos }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-15 }
+          - { os: macos-latest }
+    steps:
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install dependencies
+        shell: bash
+        run: brew install cmake ninja || true
+      # TODO: align CMake target name with avendish convention once finalized
+      - name: Configure & build dump target
+        shell: bash
+        run: |
+          set -euo pipefail
+          ADDON="${{ github.event.repository.name }}"
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DAVND_BUILD_PORTABILITY=ON \
+            -DAVND_DISABLE_DEFAULT_BACKENDS=ON \
+            -DCMAKE_CXX_FLAGS="-Werror=return-type"
+          cmake --build build --target "dump_${ADDON}" -j 4
+
+  # ---------------- windows_msvc ----------------
+  windows_msvc:
+    name: "windows msvc (${{ matrix.arch-tag }})"
+    if: ${{ inputs.windows_msvc }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest,  arch-tag: x86_64 }
+          - { os: windows-11-arm,  arch-tag: arm64  }
+    steps:
+      - name: Support longpaths
+        shell: bash
+        run: git config --global core.longpaths true
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      # TODO: align CMake target name with avendish convention once finalized
+      - name: Configure & build dump target
+        shell: bash
+        run: |
+          set -euo pipefail
+          ADDON="${{ github.event.repository.name }}"
+          # MSVC does not ship ASan/UBSan for the avendish path; skip sanitizers.
+          cmake -S . -B build \
+            -DAVND_BUILD_PORTABILITY=ON \
+            -DAVND_DISABLE_DEFAULT_BACKENDS=ON
+          cmake --build build --config Release --target "dump_${ADDON}" -j 4
+
+  # ---------------- windows_mingw ----------------
+  windows_mingw:
+    name: "windows mingw (x86_64)"
+    if: ${{ inputs.windows_mingw }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install mingw-w64 cross toolchain
+        shell: bash
+        run: |
+          sudo apt -y update
+          sudo apt install -yqq cmake ninja-build gcc-mingw-w64 g++-mingw-w64
+      - name: Synthesize mingw toolchain file
+        shell: bash
+        run: |
+          cat > mingw-toolchain.cmake <<'EOF'
+          set(CMAKE_SYSTEM_NAME Windows)
+          set(CMAKE_SYSTEM_PROCESSOR x86_64)
+          set(CMAKE_C_COMPILER   x86_64-w64-mingw32-gcc)
+          set(CMAKE_CXX_COMPILER x86_64-w64-mingw32-g++)
+          set(CMAKE_RC_COMPILER  x86_64-w64-mingw32-windres)
+          set(CMAKE_FIND_ROOT_PATH /usr/x86_64-w64-mingw32)
+          set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+          set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+          EOF
+      # TODO: align CMake target name with avendish convention once finalized
+      - name: Configure & build dump target
+        shell: bash
+        run: |
+          set -euo pipefail
+          ADDON="${{ github.event.repository.name }}"
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=$(pwd)/mingw-toolchain.cmake \
+            -DAVND_BUILD_PORTABILITY=ON \
+            -DAVND_DISABLE_DEFAULT_BACKENDS=ON \
+            -DCMAKE_CXX_FLAGS="-Werror=return-type"
+          cmake --build build --target "dump_${ADDON}" -j 4
+
+  # ---------------- freebsd ----------------
+  freebsd:
+    name: "freebsd"
+    if: ${{ inputs.freebsd }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      # TODO: align CMake target name with avendish convention once finalized
+      - name: Configure & build dump target in FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          prepare: |
+            pkg install -y cmake ninja boost-libs
+          run: |
+            set -e
+            ADDON="${{ github.event.repository.name }}"
+            cmake -S . -B build -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DAVND_BUILD_PORTABILITY=ON \
+              -DAVND_DISABLE_DEFAULT_BACKENDS=ON \
+              -DCMAKE_CXX_FLAGS="-Werror=return-type"
+            cmake --build build --target "dump_${ADDON}" -j 4
+
+  # ---------------- wasm ----------------
+  wasm:
+    name: "wasm (emscripten)"
+    if: ${{ inputs.wasm }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install dependencies
+        shell: bash
+        run: |
+          sudo apt -y update
+          sudo apt install -yqq cmake ninja-build
+      - name: Setup emsdk
+        uses: mymindstorm/setup-emsdk@v14
+      # TODO: align CMake target name with avendish convention once finalized
+      - name: Configure & build dump target
+        shell: bash
+        run: |
+          set -euo pipefail
+          ADDON="${{ github.event.repository.name }}"
+          emcmake cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DAVND_BUILD_PORTABILITY=ON \
+            -DAVND_DISABLE_DEFAULT_BACKENDS=ON
+          cmake --build build --target "dump_${ADDON}" -j 4
+
+  # ---------------- android ----------------
+  android:
+    name: "android (arm64-v8a)"
+    if: ${{ inputs.android }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android NDK r26
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install "platforms;android-34" "build-tools;34.0.0" "ndk;26.1.10909125"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> "$GITHUB_ENV"
+      - name: Install host build deps
+        shell: bash
+        run: |
+          sudo apt -y update
+          sudo apt install -yqq cmake ninja-build
+      # TODO: align CMake target name with avendish convention once finalized
+      - name: Configure & build dump target
+        shell: bash
+        run: |
+          set -euo pipefail
+          ADDON="${{ github.event.repository.name }}"
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-30 \
+            -DAVND_BUILD_PORTABILITY=ON \
+            -DAVND_DISABLE_DEFAULT_BACKENDS=ON \
+            -DCMAKE_CXX_FLAGS="-Werror=return-type"
+          cmake --build build --target "dump_${ADDON}" -j 4
+
+  # ---------------- ios ----------------
+  ios:
+    name: "ios (cross-compile)"
+    if: ${{ inputs.ios }}
+    runs-on: macos-15
+    steps:
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install dependencies
+        shell: bash
+        run: brew install cmake ninja || true
+      # TODO: align CMake target name with avendish convention once finalized
+      - name: Configure & build dump target
+        shell: bash
+        run: |
+          set -euo pipefail
+          ADDON="${{ github.event.repository.name }}"
+          cmake -S . -B build -GXcode \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_XCODE_EFFECTIVE_PLATFORMS=-iphoneos \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
+            -DAVND_BUILD_PORTABILITY=ON \
+            -DAVND_DISABLE_DEFAULT_BACKENDS=ON \
+            -DCMAKE_CXX_FLAGS="-Werror=return-type"
+          cmake --build build --target "dump_${ADDON}" -- -quiet
+
+  # ---------------- esp32 ----------------
+  esp32:
+    name: "esp32 (${{ matrix.fqbn }})"
+    if: ${{ inputs.esp32 }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        fqbn:
+          - esp32:esp32:um_tinypico
+          - esp32:esp32:XIAO_ESP32S3
+          - esp32:esp32:m5stack_stickc
+          - esp32:esp32:esp32c3
+          - esp32:esp32:esp32s3
+          - esp32:esp32:esp32s2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: addon
+      - name: Guard - require examples/*.ino
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd addon
+          if [ -z "$(find examples -name '*.ino' 2>/dev/null)" ]; then
+            echo "::warning::No examples/*.ino found - skipping ESP32 lane"
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=0" >> "$GITHUB_OUTPUT"
+      - name: Install arduino-cli
+        if: steps.guard.outputs.skip == '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
+          echo "$PWD/bin" >> "$GITHUB_PATH"
+      - name: Install esp32:esp32 core
+        if: steps.guard.outputs.skip == '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          arduino-cli config init
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+      - name: Symlink addon into Arduino libraries
+        if: steps.guard.outputs.skip == '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ADDON="${{ github.event.repository.name }}"
+          mkdir -p "$HOME/Arduino/libraries"
+          ln -sfn "$PWD/addon" "$HOME/Arduino/libraries/$ADDON"
+      - name: Compile examples/*.ino for ${{ matrix.fqbn }}
+        if: steps.guard.outputs.skip == '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          FAIL=0
+          while IFS= read -r -d '' sketch; do
+            echo "::group::Compile $sketch for ${{ matrix.fqbn }}"
+            arduino-cli compile \
+              --fqbn "${{ matrix.fqbn }}" \
+              --build-property build.partitions=min_spiffs \
+              --build-property upload.maximum_size=1966080 \
+              "$sketch" || FAIL=1
+            echo "::endgroup::"
+          done < <(find addon/examples -name '*.ino' -print0)
+          exit "$FAIL"
+
+  # ---------------- rp2040 ----------------
+  # TODO: align rp2040 core / boards with what avendish addons actually need
+  rp2040:
+    name: "rp2040 (${{ matrix.fqbn }})"
+    if: ${{ inputs.rp2040 }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        fqbn:
+          - rp2040:rp2040:rpipico
+          - rp2040:rp2040:rpipico2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          path: addon
+      - name: Guard - require examples/*.ino
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd addon
+          if [ -z "$(find examples -name '*.ino' 2>/dev/null)" ]; then
+            echo "::warning::No examples/*.ino found - skipping RP2040 lane"
+            echo "skip=1" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=0" >> "$GITHUB_OUTPUT"
+      - name: Install arduino-cli
+        if: steps.guard.outputs.skip == '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
+          echo "$PWD/bin" >> "$GITHUB_PATH"
+      - name: Install rp2040:rp2040 (Earle Philhower) core
+        if: steps.guard.outputs.skip == '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          arduino-cli config init
+          # Earle Philhower's rp2040 core covers more boards than arduino:mbed_rp2040.
+          arduino-cli config add board_manager.additional_urls \
+            https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
+          arduino-cli core update-index
+          arduino-cli core install rp2040:rp2040
+      - name: Symlink addon into Arduino libraries
+        if: steps.guard.outputs.skip == '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ADDON="${{ github.event.repository.name }}"
+          mkdir -p "$HOME/Arduino/libraries"
+          ln -sfn "$PWD/addon" "$HOME/Arduino/libraries/$ADDON"
+      - name: Compile examples/*.ino for ${{ matrix.fqbn }}
+        if: steps.guard.outputs.skip == '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          FAIL=0
+          while IFS= read -r -d '' sketch; do
+            echo "::group::Compile $sketch for ${{ matrix.fqbn }}"
+            arduino-cli compile \
+              --fqbn "${{ matrix.fqbn }}" \
+              "$sketch" || FAIL=1
+            echo "::endgroup::"
+          done < <(find addon/examples -name '*.ino' -print0)
+          exit "$FAIL"
