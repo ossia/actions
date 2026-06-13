@@ -109,7 +109,7 @@ runs:
               echo "Copying plugin: $plugin"
               cp -f "$plugin" "$GST_STAGING_ABS/"
               FOUND=$((FOUND + 1))
-            done < <(find "$BUILD_GST_DIR" -maxdepth 1 -type f \
+            done < <(find "$BUILD_GST_DIR" -maxdepth 2 -type f \
                        \( -name 'lib*.so' -o -name 'lib*.so.*' \) -print0)
             ;;
           macos)
@@ -123,7 +123,7 @@ runs:
               echo "Copying plugin: $plugin"
               cp -f "$plugin" "$GST_STAGING_ABS/"
               FOUND=$((FOUND + 1))
-            done < <(find "$BUILD_GST_DIR" -maxdepth 1 -type f \
+            done < <(find "$BUILD_GST_DIR" -maxdepth 2 -type f \
                        \( -name 'lib*.so' -o -name 'lib*.dylib' \) -print0)
             ;;
           windows)
@@ -131,7 +131,7 @@ runs:
               echo "Copying plugin: $plugin"
               cp -f "$plugin" "$GST_STAGING_ABS/"
               FOUND=$((FOUND + 1))
-            done < <(find "$BUILD_GST_DIR" -maxdepth 1 -type f -name '*.dll' -print0)
+            done < <(find "$BUILD_GST_DIR" -maxdepth 2 -type f -name '*.dll' -print0)
             ;;
           *)
             echo "Error: unsupported os-tag '${{ inputs.os-tag }}'"

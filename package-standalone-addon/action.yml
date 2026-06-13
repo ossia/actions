@@ -97,7 +97,7 @@ runs:
           echo "Copying .app bundle: $bundle"
           cp -R "$bundle" "$STANDALONE_STAGING_ABS/"
           FOUND=$((FOUND + 1))
-        done < <(find "$BUILD_STANDALONE_DIR" -maxdepth 1 -name '*.app' -type d -print0)
+        done < <(find "$BUILD_STANDALONE_DIR" -maxdepth 2 -name '*.app' -type d -print0)
 
         if [[ $FOUND -eq 0 ]]; then
           echo "Error: no .app bundles found in $BUILD_STANDALONE_DIR"
@@ -131,7 +131,7 @@ runs:
           echo "Copying .exe: $exe"
           cp -f "$exe" "$APP_DIR/"
           FOUND=$((FOUND + 1))
-        done < <(find "$BUILD_STANDALONE_DIR" -maxdepth 1 -name '*.exe' -type f -print0)
+        done < <(find "$BUILD_STANDALONE_DIR" -maxdepth 2 -name '*.exe' -type f -print0)
 
         if [[ $FOUND -eq 0 ]]; then
           echo "Error: no .exe binaries found in $BUILD_STANDALONE_DIR"
@@ -142,7 +142,7 @@ runs:
         while IFS= read -r -d '' dll; do
           echo "Copying runtime .dll: $dll"
           cp -f "$dll" "$APP_DIR/"
-        done < <(find "$BUILD_STANDALONE_DIR" -maxdepth 1 -name '*.dll' -type f -print0)
+        done < <(find "$BUILD_STANDALONE_DIR" -maxdepth 2 -name '*.dll' -type f -print0)
 
         echo "Staged contents:"
         ls -la "$APP_DIR"
@@ -177,7 +177,7 @@ runs:
           cp -f "$bin" "$APP_DIR/"
           chmod +x "$APP_DIR/$(basename "$bin")"
           FOUND=$((FOUND + 1))
-        done < <(find "$BUILD_STANDALONE_DIR" -maxdepth 1 -type f -executable -print0)
+        done < <(find "$BUILD_STANDALONE_DIR" -maxdepth 2 -type f -executable -print0)
 
         if [[ $FOUND -eq 0 ]]; then
           echo "Error: no executable binaries found in $BUILD_STANDALONE_DIR"
@@ -188,7 +188,7 @@ runs:
         while IFS= read -r -d '' so; do
           echo "Copying runtime .so: $so"
           cp -f "$so" "$APP_DIR/"
-        done < <(find "$BUILD_STANDALONE_DIR" -maxdepth 1 -type f \( -name '*.so' -o -name '*.so.*' \) -print0)
+        done < <(find "$BUILD_STANDALONE_DIR" -maxdepth 2 -type f \( -name '*.so' -o -name '*.so.*' \) -print0)
 
         echo "Staged contents:"
         ls -la "$APP_DIR"
@@ -282,7 +282,7 @@ runs:
           "$SIGNTOOL" sign //f "$PFX_FILE" //p "$PWD_ARG" \
             //tr http://timestamp.digicert.com //td sha256 //fd sha256 \
             "$bin"
-        done < <(find "$APP_DIR" -maxdepth 1 \( -name '*.exe' -o -name '*.dll' \) -print0)
+        done < <(find "$APP_DIR" -maxdepth 2 \( -name '*.exe' -o -name '*.dll' \) -print0)
 
         rm -f "$PFX_FILE"
 
@@ -311,7 +311,7 @@ runs:
         APP_DIR="$STANDALONE_STAGING_ABS/${{ inputs.addon-name }}"
 
         # Find a representative exe name for the README
-        BIN_NAME=$(find "$APP_DIR" -maxdepth 1 -name '*.exe' -printf '%f\n' | head -1)
+        BIN_NAME=$(find "$APP_DIR" -maxdepth 2 -name '*.exe' -printf '%f\n' | head -1)
         if [[ -z "$BIN_NAME" ]]; then
           BIN_NAME="${{ inputs.addon-name }}.exe"
         fi
@@ -334,7 +334,7 @@ runs:
 
         APP_DIR="$STANDALONE_STAGING_ABS/${{ inputs.addon-name }}"
 
-        BIN_NAME=$(find "$APP_DIR" -maxdepth 1 -type f -executable ! -name '*.so' ! -name '*.so.*' -printf '%f\n' | head -1)
+        BIN_NAME=$(find "$APP_DIR" -maxdepth 2 -type f -executable ! -name '*.so' ! -name '*.so.*' -printf '%f\n' | head -1)
         if [[ -z "$BIN_NAME" ]]; then
           BIN_NAME="${{ inputs.addon-name }}"
         fi
