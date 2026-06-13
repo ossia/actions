@@ -214,7 +214,7 @@ jobs:
           cmake --build addon/build --config Release
       - name: Package pd backend
         id: package
-        uses: ossia/actions/package-pd-addon@master
+        uses: ossia/actions/package-pd-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
@@ -351,7 +351,7 @@ jobs:
           cmake --build addon/build --config Release
       - name: Package max backend
         id: package
-        uses: ossia/actions/package-max-addon@master
+        uses: ossia/actions/package-max-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
@@ -541,7 +541,7 @@ jobs:
           cmake --build addon/build --config Release
       - name: Package vst3 backend
         id: package
-        uses: ossia/actions/package-vst3-addon@master
+        uses: ossia/actions/package-vst3-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
@@ -627,7 +627,7 @@ jobs:
           cmake --build addon/build --config Release
       - name: Package clap backend
         id: package
-        uses: ossia/actions/package-clap-addon@master
+        uses: ossia/actions/package-clap-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
@@ -698,7 +698,7 @@ jobs:
           cmake --build addon/build --config Release
       - name: Package vintage backend
         id: package
-        uses: ossia/actions/package-vintage-addon@master
+        uses: ossia/actions/package-vintage-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
@@ -776,7 +776,7 @@ jobs:
           cmake --build addon/build --config Release
       - name: Package touchdesigner backend
         id: package
-        uses: ossia/actions/package-touchdesigner-addon@master
+        uses: ossia/actions/package-touchdesigner-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
@@ -864,7 +864,7 @@ jobs:
           cmake --build addon/build --config Release
       - name: Package python backend
         id: package
-        uses: ossia/actions/package-python-addon@master
+        uses: ossia/actions/package-python-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
@@ -944,7 +944,7 @@ jobs:
           cmake --build addon/build --config Release
       - name: Package godot backend
         id: package
-        uses: ossia/actions/package-godot-addon@master
+        uses: ossia/actions/package-godot-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
@@ -1107,7 +1107,7 @@ jobs:
           cmake --build addon/build --config Release
       - name: Package standalone backend
         id: package
-        uses: ossia/actions/package-standalone-addon@master
+        uses: ossia/actions/package-standalone-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
@@ -1179,7 +1179,7 @@ jobs:
           cmake --build addon/build --config Release
       - name: Package gstreamer backend
         id: package
-        uses: ossia/actions/package-gstreamer-addon@master
+        uses: ossia/actions/package-gstreamer-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
@@ -1240,7 +1240,7 @@ jobs:
           cmake --build addon/build --config Release
       - name: Package wasm backend
         id: package
-        uses: ossia/actions/package-wasm-addon@master
+        uses: ossia/actions/package-wasm-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
