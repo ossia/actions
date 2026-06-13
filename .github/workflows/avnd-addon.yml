@@ -178,7 +178,9 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq puredata-dev jq zip
+          sudo apt install -yqq gcc-14 g++-14 puredata-dev jq zip
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -250,7 +252,7 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq zip unzip
+          sudo apt install -yqq gcc-14 g++-14 zip unzip
       - name: Merge per-OS Pd artifacts
         shell: bash
         run: |
@@ -388,7 +390,7 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq zip unzip jq
+          sudo apt install -yqq gcc-14 g++-14 zip unzip jq
       - name: Merge per-OS Max artifacts
         shell: bash
         run: |
@@ -489,7 +491,9 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq libgl-dev libx11-dev libxcb1-dev jq zip
+          sudo apt install -yqq gcc-14 g++-14 libgl-dev libx11-dev libxcb1-dev jq zip
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -587,7 +591,9 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq libgl-dev libx11-dev jq zip
+          sudo apt install -yqq gcc-14 g++-14 libgl-dev libx11-dev jq zip
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -823,7 +829,9 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq python3-dev jq zip
+          sudo apt install -yqq gcc-14 g++-14 python3-dev jq zip
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -906,7 +914,9 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq libgl-dev jq zip
+          sudo apt install -yqq gcc-14 g++-14 libgl-dev jq zip
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -974,7 +984,7 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq zip unzip
+          sudo apt install -yqq gcc-14 g++-14 zip unzip
       - name: Merge per-OS Godot artifacts
         shell: bash
         run: |
@@ -1067,7 +1077,9 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq libgl-dev libx11-dev jq zip
+          sudo apt install -yqq gcc-14 g++-14 libgl-dev libx11-dev jq zip
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -1140,8 +1152,10 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+          sudo apt install -yqq gcc-14 g++-14 libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
             libglib2.0-dev libjson-glib-dev libsoup2.4-dev pkg-config jq zip
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -1202,7 +1216,9 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq jq zip
+          sudo apt install -yqq gcc-14 g++-14 jq zip
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
       - name: Setup emsdk
         uses: mymindstorm/setup-emsdk@v14
       - name: Set up Boost
