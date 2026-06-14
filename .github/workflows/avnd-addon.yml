@@ -190,10 +190,24 @@ jobs:
         shell: bash
         run: choco install -y puredata jq zip ninja
       - name: Checkout PureData headers
+        if: runner.os != 'Windows'
         uses: actions/checkout@v4
         with:
           repository: pure-data/pure-data
           path: puredata
+      - name: Download Pd Windows binary (provides pd.lib)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # avendish.pd.cmake does find_library(PD_LIB NAMES pd) on Windows.
+          # The official Pd .msw.zip ships src/ headers + bin/pd.lib (the MSVC
+          # import lib), unlike the pure-data/pure-data git checkout which is
+          # source-only. Mirrors how libossia's ossia-pd provisions pd on Windows.
+          PD_VERSION="0.55-2"
+          curl -fsSL "http://msp.ucsd.edu/Software/pd-${PD_VERSION}.msw.zip" -o pd.zip
+          cmake -E tar xf pd.zip
+          echo "PD_WIN_ROOT=$PWD/pd-${PD_VERSION}" >> "$GITHUB_ENV"
       - name: Set up Boost
         shell: bash
         run: |
@@ -204,9 +218,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "${RUNNER_OS:-}" == "Windows" ]]; then
+            PD_INCLUDE="$PD_WIN_ROOT/src"
+            PD_LIBARG=(-DCMAKE_LIBRARY_PATH="$PD_WIN_ROOT/bin")
+          else
+            PD_INCLUDE="$PWD/puredata/src"
+            PD_LIBARG=()
+          fi
           cmake -S addon -B addon/build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INCLUDE_PATH="$PWD/puredata/src" \
+            -DCMAKE_INCLUDE_PATH="$PD_INCLUDE" \
+            "${PD_LIBARG[@]}" \
             -DBOOST_ROOT="$PWD/boost" \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
