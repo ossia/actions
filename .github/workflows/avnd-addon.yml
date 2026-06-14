@@ -225,10 +225,12 @@ jobs:
             PD_INCLUDE="$PWD/puredata/src"
             PD_LIBARG=()
           fi
+          # macOS ships bash 3.2 which errors on "${empty[@]}" under set -u;
+          # the ${arr[@]+"${arr[@]}"} idiom expands to nothing when empty.
           cmake -S addon -B addon/build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INCLUDE_PATH="$PD_INCLUDE" \
-            "${PD_LIBARG[@]}" \
+            ${PD_LIBARG[@]+"${PD_LIBARG[@]}"} \
             -DBOOST_ROOT="$PWD/boost" \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
@@ -1211,7 +1213,7 @@ jobs:
             -DBOOST_ROOT="$PWD/boost" \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
-            "${GST_LINKARGS[@]}" \
+            ${GST_LINKARGS[@]+"${GST_LINKARGS[@]}"} \
             -DAVND_ENABLE_GSTREAMER=ON
           cmake --build addon/build --config Release
       - name: Package gstreamer backend
