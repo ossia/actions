@@ -1192,11 +1192,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          GST_LINKARGS=()
+          if [[ "${RUNNER_OS:-}" == "macOS" ]]; then
+            # Homebrew's pkg-config doesn't always propagate the keg -L path into
+            # CMake's PkgConfig:: imported target, so the linker can't find
+            # libgstsdp-1.0.dylib etc. Add brew's lib dir + the pkgconfig path
+            # explicitly. PKG_CONFIG_PATH covers libsoup@2 (keg-only).
+            BREW_PREFIX="$(brew --prefix)"
+            export PKG_CONFIG_PATH="$BREW_PREFIX/opt/libsoup@2/lib/pkgconfig:$BREW_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            GST_LINKARGS=(
+              -DCMAKE_MODULE_LINKER_FLAGS="-L$BREW_PREFIX/lib"
+              -DCMAKE_SHARED_LINKER_FLAGS="-L$BREW_PREFIX/lib"
+              -DCMAKE_EXE_LINKER_FLAGS="-L$BREW_PREFIX/lib"
+            )
+          fi
           cmake -S addon -B addon/build \
             -DCMAKE_BUILD_TYPE=Release \
             -DBOOST_ROOT="$PWD/boost" \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
+            "${GST_LINKARGS[@]}" \
             -DAVND_ENABLE_GSTREAMER=ON
           cmake --build addon/build --config Release
       - name: Package gstreamer backend
