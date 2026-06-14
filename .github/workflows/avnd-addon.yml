@@ -1256,9 +1256,12 @@ jobs:
           emcmake cmake -S addon -B addon/build \
             -DCMAKE_BUILD_TYPE=Release \
             -DBOOST_ROOT="$PWD/boost" \
+            -DBoost_INCLUDE_DIR="$PWD/boost/include" \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
             -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH \
+            -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=BOTH \
+            -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=BOTH \
             -DAVND_ENABLE_WASM=ON
           cmake --build addon/build --config Release
       - name: Package wasm backend
