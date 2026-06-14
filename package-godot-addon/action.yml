@@ -114,16 +114,21 @@ runs:
           exit 1
         fi
 
-        # 2. Copy every binary (loose .so / .dylib / .dll) into bin/<os>-<arch>/.
+        # 2. Copy every binary into bin/<os>-<arch>/. On macOS avendish emits a
+        #    .framework BUNDLE directory (codesign + staple friendly); on Linux/Windows
+        #    it's a flat .so/.dll. cp -R handles both.
         BIN_COUNT=0
         while IFS= read -r -d '' bin; do
           echo "Copying binary: $bin -> $GD_BIN_DIR/"
-          cp -f "$bin" "$GD_BIN_DIR/"
+          cp -R "$bin" "$GD_BIN_DIR/"
           BIN_COUNT=$((BIN_COUNT + 1))
-        done < <(find "$GD_SRC" -maxdepth 2 -type f \( -name '*.so' -o -name '*.dylib' -o -name '*.dll' \) -print0)
+        done < <(find "$GD_SRC" -maxdepth 2 \( \
+                     \( -type f \( -name '*.so' -o -name '*.dylib' -o -name '*.dll' \) \) \
+                  -o \( -type d -name '*.framework' \) \
+                 \) -print0)
 
         if [[ "$BIN_COUNT" -eq 0 ]]; then
-          echo "Error: no Godot binaries (.so/.dylib/.dll) found under '$GD_SRC'"
+          echo "Error: no Godot binaries (.so/.dylib/.dll/.framework) found under '$GD_SRC'"
           exit 1
         fi
         echo "Collected $CFG_COUNT gdextension config(s) and $BIN_COUNT binary/binaries."
