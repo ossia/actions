@@ -1159,7 +1159,7 @@ jobs:
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         shell: bash
-        run: brew install gstreamer gst-plugins-base jq || true
+        run: brew install gstreamer gst-plugins-base json-glib libsoup@2 jq || true
       - name: Set up Boost
         shell: bash
         run: |
@@ -1236,6 +1236,7 @@ jobs:
             -DBOOST_ROOT="$PWD/boost" \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
+            -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH \
             -DAVND_ENABLE_WASM=ON
           cmake --build addon/build --config Release
       - name: Package wasm backend

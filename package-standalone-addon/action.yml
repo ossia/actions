@@ -364,7 +364,10 @@ runs:
 
         cd "$STANDALONE_STAGING_ABS"
 
-        if command -v zip >/dev/null 2>&1; then
+        if [[ "${RUNNER_OS:-}" == "Windows" ]] && command -v 7z >/dev/null 2>&1; then
+          # Windows zip (Git Bash) rejects -y; .exe + dll's are flat files anyway
+          7z a -tzip "$ZIP_PATH" .
+        elif command -v zip >/dev/null 2>&1; then
           # -y preserves symlinks (important for macOS .app bundles),
           # -X drops extra file attributes for reproducibility.
           zip -r -y -X "$ZIP_PATH" .
