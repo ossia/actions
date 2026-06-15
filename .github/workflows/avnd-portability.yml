@@ -316,8 +316,10 @@ jobs:
           set(CMAKE_FIND_ROOT_PATH /usr/x86_64-w64-mingw32)
           set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
           set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
-          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
-          set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+          # PACKAGE/INCLUDE = BOTH so find_package(Avendish) + Boost headers
+          # (fetched on the host side, not in the mingw sysroot) are visible.
+          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE BOTH)
+          set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
           EOF
       - name: Set up Boost
         shell: bash
@@ -354,7 +356,7 @@ jobs:
         with:
           usesh: true
           prepare: |
-            pkg install -y cmake ninja boost-libs
+            pkg install -y cmake ninja boost-libs git
           run: |
             set -e
             cmake -S . -B build -G Ninja \
@@ -486,8 +488,12 @@ jobs:
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
             -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH \
             -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=BOTH \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY="" \
             -DCMAKE_CXX_FLAGS="-Werror=return-type"
-          cmake --build build --config Release -- -quiet
+          # No code signing in CI — this is a compile-only portability check.
+          cmake --build build --config Release -- -quiet CODE_SIGNING_ALLOWED=NO
 
   # ---------------- esp32 ----------------
   esp32:
