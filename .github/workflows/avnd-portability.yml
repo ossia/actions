@@ -121,12 +121,25 @@ on:
 # toolchain install + the CMake configure flags.
 #
 # CMake invocation convention:
-#   - Fetch no plugin SDKs and pass no backend-enable flags.
+#   - Fetch no plugin SDKs and explicitly disable every backend via
+#     ${AVND_OFF} (AVND_ENABLE_<X>=OFF). Some backends self-provision their
+#     deps (godot fetches godot-cpp, wasm uses embind) and would otherwise
+#     build even with no SDK present — and fail to cross-compile on exotic
+#     targets. Disabling them all leaves just the plain-C++ dump +
+#     example_host targets, which IS the portability surface.
 #   - Provide Boost headers (the addon's find_package(Avendish) pulls in
 #     find_dependency(Boost), so configure fails without them).
-#   - Build everything (no --target): avendish self-skips every backend
-#     whose SDK is absent, so only the SDK-free dump + example_host
-#     targets actually compile.
+#   - Build everything (no --target): with all backends off, only dump +
+#     example_host remain.
+
+env:
+  # Disable every plugin backend so the portability build is pure C++.
+  AVND_OFF: >-
+    -DAVND_ENABLE_PD=OFF -DAVND_ENABLE_MAX=OFF -DAVND_ENABLE_VST3=OFF
+    -DAVND_ENABLE_CLAP=OFF -DAVND_ENABLE_VINTAGE=OFF
+    -DAVND_ENABLE_TOUCHDESIGNER=OFF -DAVND_ENABLE_PYTHON=OFF
+    -DAVND_ENABLE_GODOT=OFF -DAVND_ENABLE_STANDALONE=OFF
+    -DAVND_ENABLE_GSTREAMER=OFF -DAVND_ENABLE_WASM=OFF
 #       cmake -S . -B build -DBOOST_ROOT=... -DBoost_NO_BOOST_CMAKE=ON
 #       cmake --build build -j 4
 
@@ -164,7 +177,7 @@ jobs:
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
-            -DBOOST_ROOT="$PWD/boost" \
+            -DBOOST_ROOT="$PWD/boost" ${AVND_OFF} \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
             -DCMAKE_CXX_FLAGS="-Werror=return-type -fsanitize=address -fsanitize=undefined -D_GLIBCXX_DEBUG=1 -D_GLIBCXX_DEBUG_PEDANTIC=1 -D_GLIBCXX_ASSERTIONS=1"
@@ -210,7 +223,7 @@ jobs:
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_COMPILER=clang++-20 \
-            -DBOOST_ROOT="$PWD/boost" \
+            -DBOOST_ROOT="$PWD/boost" ${AVND_OFF} \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
             -DCMAKE_CXX_FLAGS="${{ matrix.extra_flags }} -Werror=return-type -fsanitize=address -fsanitize=undefined -D_GLIBCXX_DEBUG=1 -D_GLIBCXX_DEBUG_PEDANTIC=1 -D_GLIBCXX_ASSERTIONS=1"
@@ -249,7 +262,7 @@ jobs:
           set -euo pipefail
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DBOOST_ROOT="$PWD/boost" \
+            -DBOOST_ROOT="$PWD/boost" ${AVND_OFF} \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
             -DCMAKE_CXX_FLAGS="-Werror=return-type"
@@ -285,7 +298,7 @@ jobs:
           set -euo pipefail
           # MSVC does not ship ASan/UBSan for the avendish path; skip sanitizers.
           cmake -S . -B build \
-            -DBOOST_ROOT="$PWD/boost" \
+            -DBOOST_ROOT="$PWD/boost" ${AVND_OFF} \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD
           cmake --build build --config Release -j 4
@@ -334,7 +347,7 @@ jobs:
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE=$(pwd)/mingw-toolchain.cmake \
-            -DBOOST_ROOT="$PWD/boost" \
+            -DBOOST_ROOT="$PWD/boost" ${AVND_OFF} \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
             -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH \
@@ -362,6 +375,11 @@ jobs:
             cmake -S . -B build -G Ninja \
               -DCMAKE_BUILD_TYPE=Release \
               -DBOOST_ROOT=/usr/local \
+              -DAVND_ENABLE_PD=OFF -DAVND_ENABLE_MAX=OFF -DAVND_ENABLE_VST3=OFF \
+              -DAVND_ENABLE_CLAP=OFF -DAVND_ENABLE_VINTAGE=OFF \
+              -DAVND_ENABLE_TOUCHDESIGNER=OFF -DAVND_ENABLE_PYTHON=OFF \
+              -DAVND_ENABLE_GODOT=OFF -DAVND_ENABLE_STANDALONE=OFF \
+              -DAVND_ENABLE_GSTREAMER=OFF -DAVND_ENABLE_WASM=OFF \
               -DBoost_NO_BOOST_CMAKE=ON \
               -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
               -DCMAKE_CXX_FLAGS="-Werror=return-type"
@@ -395,7 +413,7 @@ jobs:
           set -euo pipefail
           emcmake cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DBOOST_ROOT="$PWD/boost" \
+            -DBOOST_ROOT="$PWD/boost" ${AVND_OFF} \
             -DBoost_INCLUDE_DIR="$PWD/boost/include" \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
@@ -444,7 +462,7 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-30 \
-            -DBOOST_ROOT="$PWD/boost" \
+            -DBOOST_ROOT="$PWD/boost" ${AVND_OFF} \
             -DBoost_INCLUDE_DIR="$PWD/boost/include" \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
@@ -482,7 +500,7 @@ jobs:
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_XCODE_EFFECTIVE_PLATFORMS=-iphoneos \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
-            -DBOOST_ROOT="$PWD/boost" \
+            -DBOOST_ROOT="$PWD/boost" ${AVND_OFF} \
             -DBoost_INCLUDE_DIR="$PWD/boost/include" \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
