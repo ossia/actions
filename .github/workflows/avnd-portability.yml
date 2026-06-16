@@ -6,12 +6,14 @@
 # addons are "plain C++ classes with introspection", so portability is a
 # correctness property worth gating in CI.
 #
-# The build target is avendish's `dump` backend: a minimal introspection
-# executable produced via `avnd_make_dump` that links nothing
-# platform-specific. For each enabled lane, this workflow configures the
-# addon with `-DAVND_BUILD_PORTABILITY=ON -DAVND_DISABLE_DEFAULT_BACKENDS=ON`
-# and builds `dump_<addon-name>` - that's it, no packaging, no upload, no
-# test execution. A failed compile fails the job.
+# The build target is avendish's SDK-free portability surface. Each
+# avendish per-backend CMake module self-skips (stubs out its
+# `avnd_make_<backend>` function) when that backend's plugin SDK isn't
+# present. So for each enabled lane this workflow fetches NO plugin SDKs,
+# configures the addon, and builds everything: only the SDK-free targets
+# compile - the addon static lib, `<C_NAME>_dump`, and
+# `<C_NAME>_example_host`. That's it, no packaging, no upload, no test
+# execution. A failed compile fails the job.
 #
 # Usage in a caller repository (.github/workflows/builds.yaml):
 #
@@ -118,12 +120,28 @@ on:
 # jobs below are intentionally near-identical and mostly differ only in the
 # toolchain install + the CMake configure flags.
 #
-# CMake invocation convention (uppercase):
-#   cmake -S . -B build \
-#     -DAVND_BUILD_PORTABILITY=ON \
-#     -DAVND_DISABLE_DEFAULT_BACKENDS=ON
-#   cmake --build build --target dump_${addon} -j 4
-# TODO: align CMake target name with avendish convention once finalized.
+# CMake invocation convention:
+#   - Fetch no plugin SDKs and explicitly disable every backend via
+#     ${AVND_OFF} (AVND_ENABLE_<X>=OFF). Some backends self-provision their
+#     deps (godot fetches godot-cpp, wasm uses embind) and would otherwise
+#     build even with no SDK present — and fail to cross-compile on exotic
+#     targets. Disabling them all leaves just the plain-C++ dump +
+#     example_host targets, which IS the portability surface.
+#   - Provide Boost headers (the addon's find_package(Avendish) pulls in
+#     find_dependency(Boost), so configure fails without them).
+#   - Build everything (no --target): with all backends off, only dump +
+#     example_host remain.
+
+env:
+  # Disable every plugin backend so the portability build is pure C++.
+  AVND_OFF: >-
+    -DAVND_ENABLE_PD=OFF -DAVND_ENABLE_MAX=OFF -DAVND_ENABLE_VST3=OFF
+    -DAVND_ENABLE_CLAP=OFF -DAVND_ENABLE_VINTAGE=OFF
+    -DAVND_ENABLE_TOUCHDESIGNER=OFF -DAVND_ENABLE_PYTHON=OFF
+    -DAVND_ENABLE_GODOT=OFF -DAVND_ENABLE_STANDALONE=OFF
+    -DAVND_ENABLE_GSTREAMER=OFF -DAVND_ENABLE_WASM=OFF
+#       cmake -S . -B build -DBOOST_ROOT=... -DBoost_NO_BOOST_CMAKE=ON
+#       cmake --build build -j 4
 
 jobs:
   # ---------------- linux_gcc ----------------
@@ -146,19 +164,24 @@ jobs:
         run: |
           sudo apt -y update
           sudo apt install -yqq cmake ninja-build ${{ matrix.pkg }}
-      # TODO: align CMake target name with avendish convention once finalized
-      - name: Configure & build dump target
+      - name: Set up Boost
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ossia/score-sdk/releases/download/sdk31/boost_1_90_0.tar.gz -o boost.tar.gz
+          mkdir -p boost/include
+          tar -xzf boost.tar.gz --strip-components=1 -C boost/include
+      - name: Configure & build
         shell: bash
         run: |
           set -euo pipefail
-          ADDON="${{ github.event.repository.name }}"
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
-            -DAVND_BUILD_PORTABILITY=ON \
-            -DAVND_DISABLE_DEFAULT_BACKENDS=ON \
+            -DBOOST_ROOT="$PWD/boost" ${AVND_OFF} \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
             -DCMAKE_CXX_FLAGS="-Werror=return-type -fsanitize=address -fsanitize=undefined -D_GLIBCXX_DEBUG=1 -D_GLIBCXX_DEBUG_PEDANTIC=1 -D_GLIBCXX_ASSERTIONS=1"
-          cmake --build build --target "dump_${ADDON}" -j 4
+          cmake --build build -j 4
 
   # ---------------- linux_clang ----------------
   linux_clang:
@@ -187,19 +210,24 @@ jobs:
           if [[ "${{ matrix.stdlib }}" == "libc++" ]]; then
             sudo apt install -yqq libc++-20-dev libc++abi-20-dev
           fi
-      # TODO: align CMake target name with avendish convention once finalized
-      - name: Configure & build dump target
+      - name: Set up Boost
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ossia/score-sdk/releases/download/sdk31/boost_1_90_0.tar.gz -o boost.tar.gz
+          mkdir -p boost/include
+          tar -xzf boost.tar.gz --strip-components=1 -C boost/include
+      - name: Configure & build
         shell: bash
         run: |
           set -euo pipefail
-          ADDON="${{ github.event.repository.name }}"
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
             -DCMAKE_CXX_COMPILER=clang++-20 \
-            -DAVND_BUILD_PORTABILITY=ON \
-            -DAVND_DISABLE_DEFAULT_BACKENDS=ON \
+            -DBOOST_ROOT="$PWD/boost" ${AVND_OFF} \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
             -DCMAKE_CXX_FLAGS="${{ matrix.extra_flags }} -Werror=return-type -fsanitize=address -fsanitize=undefined -D_GLIBCXX_DEBUG=1 -D_GLIBCXX_DEBUG_PEDANTIC=1 -D_GLIBCXX_ASSERTIONS=1"
-          cmake --build build --target "dump_${ADDON}" -j 4
+          cmake --build build -j 4
 
   # ---------------- macos ----------------
   macos:
@@ -222,18 +250,23 @@ jobs:
       - name: Install dependencies
         shell: bash
         run: brew install cmake ninja || true
-      # TODO: align CMake target name with avendish convention once finalized
-      - name: Configure & build dump target
+      - name: Set up Boost
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ossia/score-sdk/releases/download/sdk31/boost_1_90_0.tar.gz -o boost.tar.gz
+          mkdir -p boost/include
+          tar -xzf boost.tar.gz --strip-components=1 -C boost/include
+      - name: Configure & build
         shell: bash
         run: |
           set -euo pipefail
-          ADDON="${{ github.event.repository.name }}"
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DAVND_BUILD_PORTABILITY=ON \
-            -DAVND_DISABLE_DEFAULT_BACKENDS=ON \
+            -DBOOST_ROOT="$PWD/boost" ${AVND_OFF} \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
             -DCMAKE_CXX_FLAGS="-Werror=return-type"
-          cmake --build build --target "dump_${ADDON}" -j 4
+          cmake --build build -j 4
 
   # ---------------- windows_msvc ----------------
   windows_msvc:
@@ -253,17 +286,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      # TODO: align CMake target name with avendish convention once finalized
-      - name: Configure & build dump target
+      - name: Set up Boost
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ossia/score-sdk/releases/download/sdk31/boost_1_90_0.tar.gz -o boost.tar.gz
+          mkdir -p boost/include
+          tar -xzf boost.tar.gz --strip-components=1 -C boost/include
+      - name: Configure & build
         shell: bash
         run: |
           set -euo pipefail
-          ADDON="${{ github.event.repository.name }}"
           # MSVC does not ship ASan/UBSan for the avendish path; skip sanitizers.
           cmake -S . -B build \
-            -DAVND_BUILD_PORTABILITY=ON \
-            -DAVND_DISABLE_DEFAULT_BACKENDS=ON
-          cmake --build build --config Release --target "dump_${ADDON}" -j 4
+            -DBOOST_ROOT="$PWD/boost" ${AVND_OFF} \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD
+          cmake --build build --config Release -j 4
 
   # ---------------- windows_mingw ----------------
   windows_mingw:
@@ -291,22 +329,31 @@ jobs:
           set(CMAKE_FIND_ROOT_PATH /usr/x86_64-w64-mingw32)
           set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
           set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
-          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
-          set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+          # PACKAGE/INCLUDE = BOTH so find_package(Avendish) + Boost headers
+          # (fetched on the host side, not in the mingw sysroot) are visible.
+          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE BOTH)
+          set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
           EOF
-      # TODO: align CMake target name with avendish convention once finalized
-      - name: Configure & build dump target
+      - name: Set up Boost
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ossia/score-sdk/releases/download/sdk31/boost_1_90_0.tar.gz -o boost.tar.gz
+          mkdir -p boost/include
+          tar -xzf boost.tar.gz --strip-components=1 -C boost/include
+      - name: Configure & build
         shell: bash
         run: |
           set -euo pipefail
-          ADDON="${{ github.event.repository.name }}"
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE=$(pwd)/mingw-toolchain.cmake \
-            -DAVND_BUILD_PORTABILITY=ON \
-            -DAVND_DISABLE_DEFAULT_BACKENDS=ON \
+            -DBOOST_ROOT="$PWD/boost" ${AVND_OFF} \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
+            -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH \
+            -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=BOTH \
             -DCMAKE_CXX_FLAGS="-Werror=return-type"
-          cmake --build build --target "dump_${ADDON}" -j 4
+          cmake --build build -j 4
 
   # ---------------- freebsd ----------------
   freebsd:
@@ -317,22 +364,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      # TODO: align CMake target name with avendish convention once finalized
-      - name: Configure & build dump target in FreeBSD VM
+      - name: Configure & build in FreeBSD VM
         uses: vmactions/freebsd-vm@v1
         with:
           usesh: true
           prepare: |
-            pkg install -y cmake ninja boost-libs
+            pkg install -y cmake ninja boost-libs git
           run: |
             set -e
-            ADDON="${{ github.event.repository.name }}"
             cmake -S . -B build -G Ninja \
               -DCMAKE_BUILD_TYPE=Release \
-              -DAVND_BUILD_PORTABILITY=ON \
-              -DAVND_DISABLE_DEFAULT_BACKENDS=ON \
+              -DBOOST_ROOT=/usr/local \
+              -DAVND_ENABLE_PD=OFF -DAVND_ENABLE_MAX=OFF -DAVND_ENABLE_VST3=OFF \
+              -DAVND_ENABLE_CLAP=OFF -DAVND_ENABLE_VINTAGE=OFF \
+              -DAVND_ENABLE_TOUCHDESIGNER=OFF -DAVND_ENABLE_PYTHON=OFF \
+              -DAVND_ENABLE_GODOT=OFF -DAVND_ENABLE_STANDALONE=OFF \
+              -DAVND_ENABLE_GSTREAMER=OFF -DAVND_ENABLE_WASM=OFF \
+              -DBoost_NO_BOOST_CMAKE=ON \
+              -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
               -DCMAKE_CXX_FLAGS="-Werror=return-type"
-            cmake --build build --target "dump_${ADDON}" -j 4
+            cmake --build build -j 4
 
   # ---------------- wasm ----------------
   wasm:
@@ -350,17 +401,26 @@ jobs:
           sudo apt install -yqq cmake ninja-build
       - name: Setup emsdk
         uses: mymindstorm/setup-emsdk@v14
-      # TODO: align CMake target name with avendish convention once finalized
-      - name: Configure & build dump target
+      - name: Set up Boost
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ossia/score-sdk/releases/download/sdk31/boost_1_90_0.tar.gz -o boost.tar.gz
+          mkdir -p boost/include
+          tar -xzf boost.tar.gz --strip-components=1 -C boost/include
+      - name: Configure & build
         shell: bash
         run: |
           set -euo pipefail
-          ADDON="${{ github.event.repository.name }}"
           emcmake cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DAVND_BUILD_PORTABILITY=ON \
-            -DAVND_DISABLE_DEFAULT_BACKENDS=ON
-          cmake --build build --target "dump_${ADDON}" -j 4
+            -DBOOST_ROOT="$PWD/boost" ${AVND_OFF} \
+            -DBoost_INCLUDE_DIR="$PWD/boost/include" \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
+            -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH \
+            -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=BOTH \
+            -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=BOTH
+          cmake --build build -j 4
 
   # ---------------- android ----------------
   android:
@@ -387,21 +447,29 @@ jobs:
         run: |
           sudo apt -y update
           sudo apt install -yqq cmake ninja-build
-      # TODO: align CMake target name with avendish convention once finalized
-      - name: Configure & build dump target
+      - name: Set up Boost
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ossia/score-sdk/releases/download/sdk31/boost_1_90_0.tar.gz -o boost.tar.gz
+          mkdir -p boost/include
+          tar -xzf boost.tar.gz --strip-components=1 -C boost/include
+      - name: Configure & build
         shell: bash
         run: |
           set -euo pipefail
-          ADDON="${{ github.event.repository.name }}"
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-30 \
-            -DAVND_BUILD_PORTABILITY=ON \
-            -DAVND_DISABLE_DEFAULT_BACKENDS=ON \
+            -DBOOST_ROOT="$PWD/boost" ${AVND_OFF} \
+            -DBoost_INCLUDE_DIR="$PWD/boost/include" \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
+            -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH \
+            -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=BOTH \
             -DCMAKE_CXX_FLAGS="-Werror=return-type"
-          cmake --build build --target "dump_${ADDON}" -j 4
+          cmake --build build -j 4
 
   # ---------------- ios ----------------
   ios:
@@ -418,20 +486,32 @@ jobs:
       - name: Install dependencies
         shell: bash
         run: brew install cmake ninja || true
-      # TODO: align CMake target name with avendish convention once finalized
-      - name: Configure & build dump target
+      - name: Set up Boost
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ossia/score-sdk/releases/download/sdk31/boost_1_90_0.tar.gz -o boost.tar.gz
+          mkdir -p boost/include
+          tar -xzf boost.tar.gz --strip-components=1 -C boost/include
+      - name: Configure & build
         shell: bash
         run: |
           set -euo pipefail
-          ADDON="${{ github.event.repository.name }}"
           cmake -S . -B build -GXcode \
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_XCODE_EFFECTIVE_PLATFORMS=-iphoneos \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
-            -DAVND_BUILD_PORTABILITY=ON \
-            -DAVND_DISABLE_DEFAULT_BACKENDS=ON \
+            -DBOOST_ROOT="$PWD/boost" ${AVND_OFF} \
+            -DBoost_INCLUDE_DIR="$PWD/boost/include" \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
+            -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH \
+            -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=BOTH \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY="" \
             -DCMAKE_CXX_FLAGS="-Werror=return-type"
-          cmake --build build --target "dump_${ADDON}" -- -quiet
+          # No code signing in CI — this is a compile-only portability check.
+          cmake --build build --config Release -- -quiet CODE_SIGNING_ALLOWED=NO
 
   # ---------------- esp32 ----------------
   esp32:

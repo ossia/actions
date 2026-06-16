@@ -97,7 +97,7 @@ runs:
           echo "Copying CLAP plugin: $plugin"
           cp -R "$plugin" "$CLAP_STAGING_ABS/"
           FOUND=$((FOUND + 1))
-        done < <(find "$BUILD_CLAP_DIR" -maxdepth 1 -name '*.clap' -print0)
+        done < <(find "$BUILD_CLAP_DIR" -maxdepth 2 -name '*.clap' -print0)
 
         if [[ $FOUND -eq 0 ]]; then
           echo "Error: no .clap plugins found in $BUILD_CLAP_DIR"

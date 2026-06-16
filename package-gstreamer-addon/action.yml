@@ -109,8 +109,8 @@ runs:
               echo "Copying plugin: $plugin"
               cp -f "$plugin" "$GST_STAGING_ABS/"
               FOUND=$((FOUND + 1))
-            done < <(find "$BUILD_GST_DIR" -maxdepth 1 -type f \
-                       \( -name 'lib*.so' -o -name 'lib*.so.*' \) -print0)
+            done < <(find "$BUILD_GST_DIR" -maxdepth 2 -type f \
+                       \( -name '*.so' -o -name '*.so.*' \) -print0)
             ;;
           macos)
             # macOS MODULE libs can land as either lib*.so (CMake default) or
@@ -123,15 +123,15 @@ runs:
               echo "Copying plugin: $plugin"
               cp -f "$plugin" "$GST_STAGING_ABS/"
               FOUND=$((FOUND + 1))
-            done < <(find "$BUILD_GST_DIR" -maxdepth 1 -type f \
-                       \( -name 'lib*.so' -o -name 'lib*.dylib' \) -print0)
+            done < <(find "$BUILD_GST_DIR" -maxdepth 2 -type f \
+                       \( -name '*.so' -o -name '*.dylib' \) -print0)
             ;;
           windows)
             while IFS= read -r -d '' plugin; do
               echo "Copying plugin: $plugin"
               cp -f "$plugin" "$GST_STAGING_ABS/"
               FOUND=$((FOUND + 1))
-            done < <(find "$BUILD_GST_DIR" -maxdepth 1 -type f -name '*.dll' -print0)
+            done < <(find "$BUILD_GST_DIR" -maxdepth 2 -type f -name '*.dll' -print0)
             ;;
           *)
             echo "Error: unsupported os-tag '${{ inputs.os-tag }}'"

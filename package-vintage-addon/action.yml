@@ -101,20 +101,20 @@ runs:
             echo "Copying VST2 bundle: $plugin"
             cp -R "$plugin" "$VST2_STAGING_ABS/"
             FOUND=$((FOUND + 1))
-          done < <(find "$BUILD_VST2_DIR" -maxdepth 1 -type d -name '*.vst' -print0)
+          done < <(find "$BUILD_VST2_DIR" -maxdepth 2 -type d -name '*.vst' -print0)
         elif [[ "$OS_TAG" == "windows" ]]; then
           while IFS= read -r -d '' plugin; do
             echo "Copying VST2 DLL: $plugin"
             cp -f "$plugin" "$VST2_STAGING_ABS/"
             FOUND=$((FOUND + 1))
-          done < <(find "$BUILD_VST2_DIR" -maxdepth 1 -type f -name '*.dll' -print0)
+          done < <(find "$BUILD_VST2_DIR" -maxdepth 2 -type f -name '*.dll' -print0)
         else
           # linux
           while IFS= read -r -d '' plugin; do
             echo "Copying VST2 SO: $plugin"
             cp -f "$plugin" "$VST2_STAGING_ABS/"
             FOUND=$((FOUND + 1))
-          done < <(find "$BUILD_VST2_DIR" -maxdepth 1 -type f -name '*.so' -print0)
+          done < <(find "$BUILD_VST2_DIR" -maxdepth 2 -type f -name '*.so' -print0)
         fi
 
         if [[ $FOUND -eq 0 ]]; then

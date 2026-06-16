@@ -311,7 +311,10 @@ runs:
         set -euo pipefail
         cd "$OUTPUT_DIR"
         rm -f "$ZIP_PATH"
-        if command -v zip >/dev/null 2>&1; then
+        if [[ "${RUNNER_OS:-}" == "Windows" ]] && command -v 7z >/dev/null 2>&1; then
+          # Windows zip (Git Bash) rejects -y; .mxe64 are flat files anyway
+          7z a -tzip "$ZIP_NAME" "${{ inputs.addon-name }}"
+        elif command -v zip >/dev/null 2>&1; then
           # -y preserves symlinks (matters for .mxo bundles on macOS)
           zip -ry "$ZIP_NAME" "${{ inputs.addon-name }}"
         elif command -v 7z >/dev/null 2>&1; then

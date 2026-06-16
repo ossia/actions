@@ -99,7 +99,7 @@ runs:
           echo "Copying VST3 bundle: $bundle"
           cp -R "$bundle" "$VST3_STAGING_ABS/"
           FOUND=$((FOUND + 1))
-        done < <(find "$BUILD_VST3_DIR" -maxdepth 1 -name '*.vst3' -type d -print0)
+        done < <(find "$BUILD_VST3_DIR" -maxdepth 2 -name '*.vst3' -type d -print0)
 
         if [[ $FOUND -eq 0 ]]; then
           # Fallback: maybe a flat file (non-standard but defensive)
@@ -107,7 +107,7 @@ runs:
             echo "Copying VST3 file: $bundle"
             cp -R "$bundle" "$VST3_STAGING_ABS/"
             FOUND=$((FOUND + 1))
-          done < <(find "$BUILD_VST3_DIR" -maxdepth 1 -name '*.vst3' -print0)
+          done < <(find "$BUILD_VST3_DIR" -maxdepth 2 -name '*.vst3' -print0)
         fi
 
         if [[ $FOUND -eq 0 ]]; then

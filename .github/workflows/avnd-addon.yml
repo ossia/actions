@@ -140,7 +140,12 @@ on:
 # backend name, the matrix, and the -D flag passed to CMake.
 #
 # CMake flag convention (uppercase):  -DAVND_ENABLE_<BACKEND>=ON
-# TODO: align with avendish CMake flag naming once standardised upstream.
+#
+# Each per-backend job inlines its own SDK fetch (mirroring the proven
+# pattern in the `avendish-template/action.yml` composite action) so this
+# workflow works for addons whose dependencies.cmake just FetchContents
+# avendish (e.g. celtera/avendish-*-processor-template) without any need
+# for the ossia/score SDK bundle.
 
 jobs:
   # ---------------- pd ----------------
@@ -173,7 +178,9 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq puredata-dev jq zip
+          sudo apt install -yqq gcc-14 g++-14 puredata-dev jq zip
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -182,21 +189,56 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: choco install -y puredata jq zip ninja
-      - name: Download OSSIA SDK
-        id: ossia-sdk
-        uses: ossia/actions/download-ossia-sdk@master
+      - name: Checkout PureData headers
+        if: runner.os != 'Windows'
+        uses: actions/checkout@v4
+        with:
+          repository: pure-data/pure-data
+          path: puredata
+      - name: Download Pd Windows binary (provides pd.lib)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # avendish.pd.cmake does find_library(PD_LIB NAMES pd) on Windows.
+          # The official Pd .msw.zip ships src/ headers + bin/pd.lib (the MSVC
+          # import lib), unlike the pure-data/pure-data git checkout which is
+          # source-only. Mirrors how libossia's ossia-pd provisions pd on Windows.
+          PD_VERSION="0.55-2"
+          curl -fsSL "http://msp.ucsd.edu/Software/pd-${PD_VERSION}.msw.zip" -o pd.zip
+          cmake -E tar xf pd.zip
+          echo "PD_WIN_ROOT=$PWD/pd-${PD_VERSION}" >> "$GITHUB_ENV"
+      - name: Set up Boost
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ossia/score-sdk/releases/download/sdk31/boost_1_90_0.tar.gz -o boost.tar.gz
+          mkdir -p boost/include
+          tar -xzf boost.tar.gz --strip-components=1 -C boost/include
       - name: Configure & build
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "${RUNNER_OS:-}" == "Windows" ]]; then
+            PD_INCLUDE="$PD_WIN_ROOT/src"
+            PD_LIBARG=(-DCMAKE_LIBRARY_PATH="$PD_WIN_ROOT/bin")
+          else
+            PD_INCLUDE="$PWD/puredata/src"
+            PD_LIBARG=()
+          fi
+          # macOS ships bash 3.2 which errors on "${empty[@]}" under set -u;
+          # the ${arr[@]+"${arr[@]}"} idiom expands to nothing when empty.
           cmake -S addon -B addon/build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DCMAKE_INCLUDE_PATH="$PD_INCLUDE" \
+            ${PD_LIBARG[@]+"${PD_LIBARG[@]}"} \
+            -DBOOST_ROOT="$PWD/boost" \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
             -DAVND_ENABLE_PD=ON
           cmake --build addon/build --config Release
       - name: Package pd backend
         id: package
-        uses: ossia/actions/package-pd-addon@master
+        uses: ossia/actions/package-pd-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
@@ -234,7 +276,7 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq zip unzip
+          sudo apt install -yqq gcc-14 g++-14 zip unzip
       - name: Merge per-OS Pd artifacts
         shell: bash
         run: |
@@ -307,21 +349,33 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: choco install -y jq zip ninja
-      - name: Download OSSIA SDK
-        id: ossia-sdk
-        uses: ossia/actions/download-ossia-sdk@master
+      - name: Checkout Max SDK
+        uses: actions/checkout@v4
+        with:
+          repository: jcelerier/max-sdk-base
+          submodules: recursive
+          path: max-sdk-base
+      - name: Set up Boost
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ossia/score-sdk/releases/download/sdk31/boost_1_90_0.tar.gz -o boost.tar.gz
+          mkdir -p boost/include
+          tar -xzf boost.tar.gz --strip-components=1 -C boost/include
       - name: Configure & build
         shell: bash
         run: |
           set -euo pipefail
           cmake -S addon -B addon/build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DAVND_MAXSDK_PATH="$PWD/max-sdk-base" \
+            -DBOOST_ROOT="$PWD/boost" \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
             -DAVND_ENABLE_MAX=ON
           cmake --build addon/build --config Release
       - name: Package max backend
         id: package
-        uses: ossia/actions/package-max-addon@master
+        uses: ossia/actions/package-max-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
@@ -360,7 +414,7 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq zip unzip jq
+          sudo apt install -yqq gcc-14 g++-14 zip unzip jq
       - name: Merge per-OS Max artifacts
         shell: bash
         run: |
@@ -461,7 +515,9 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq libgl-dev libx11-dev libxcb1-dev jq zip
+          sudo apt install -yqq gcc-14 g++-14 libgl-dev libx11-dev libxcb1-dev jq zip
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -470,21 +526,46 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: choco install -y jq zip ninja
-      - name: Download OSSIA SDK
-        id: ossia-sdk
-        uses: ossia/actions/download-ossia-sdk@master
+      - name: Checkout VST3 SDK
+        uses: actions/checkout@v4
+        with:
+          repository: steinbergmedia/vst3sdk
+          submodules: recursive
+          path: vst3sdk
+      - name: Set up Boost
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ossia/score-sdk/releases/download/sdk31/boost_1_90_0.tar.gz -o boost.tar.gz
+          mkdir -p boost/include
+          tar -xzf boost.tar.gz --strip-components=1 -C boost/include
       - name: Configure & build
         shell: bash
         run: |
           set -euo pipefail
+          EXTRA=()
+          # Xcode 26's SDK no longer transitively provides std::terminate to
+          # the VST3 SDK's threadchecker_mac.mm.
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            EXTRA+=( "-DCMAKE_CXX_FLAGS=-include exception" )
+          fi
           cmake -S addon -B addon/build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
-            -DAVND_ENABLE_VST3=ON
+            -DVST3_SDK_ROOT="$PWD/vst3sdk" \
+            -DSMTG_ENABLE_VSTGUI_SUPPORT=OFF \
+            -DSMTG_ADD_VSTGUI=OFF \
+            -DSMTG_CREATE_PLUGIN_LINK=OFF \
+            -DSMTG_RUN_VST_VALIDATOR=OFF \
+            -DSMTG_ENABLE_VST3_PLUGIN_EXAMPLES=OFF \
+            -DSMTG_ENABLE_VST3_HOSTING_EXAMPLES=OFF \
+            -DBOOST_ROOT="$PWD/boost" \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
+            -DAVND_ENABLE_VST3=ON \
+            "${EXTRA[@]}"
           cmake --build addon/build --config Release
       - name: Package vst3 backend
         id: package
-        uses: ossia/actions/package-vst3-addon@master
+        uses: ossia/actions/package-vst3-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
@@ -534,7 +615,9 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq libgl-dev libx11-dev jq zip
+          sudo apt install -yqq gcc-14 g++-14 libgl-dev libx11-dev jq zip
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -543,21 +626,32 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: choco install -y jq zip ninja
-      - name: Download OSSIA SDK
-        id: ossia-sdk
-        uses: ossia/actions/download-ossia-sdk@master
+      - name: Checkout CLAP SDK
+        uses: actions/checkout@v4
+        with:
+          repository: free-audio/clap
+          path: clap-sdk
+      - name: Set up Boost
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ossia/score-sdk/releases/download/sdk31/boost_1_90_0.tar.gz -o boost.tar.gz
+          mkdir -p boost/include
+          tar -xzf boost.tar.gz --strip-components=1 -C boost/include
       - name: Configure & build
         shell: bash
         run: |
           set -euo pipefail
           cmake -S addon -B addon/build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DCMAKE_PREFIX_PATH="$PWD/clap-sdk" \
+            -DBOOST_ROOT="$PWD/boost" \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
             -DAVND_ENABLE_CLAP=ON
           cmake --build addon/build --config Release
       - name: Package clap backend
         id: package
-        uses: ossia/actions/package-clap-addon@master
+        uses: ossia/actions/package-clap-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
@@ -609,21 +703,26 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: choco install -y jq zip ninja
-      - name: Download OSSIA SDK
-        id: ossia-sdk
-        uses: ossia/actions/download-ossia-sdk@master
+      - name: Set up Boost
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ossia/score-sdk/releases/download/sdk31/boost_1_90_0.tar.gz -o boost.tar.gz
+          mkdir -p boost/include
+          tar -xzf boost.tar.gz --strip-components=1 -C boost/include
       - name: Configure & build
         shell: bash
         run: |
           set -euo pipefail
           cmake -S addon -B addon/build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DBOOST_ROOT="$PWD/boost" \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
             -DAVND_ENABLE_VINTAGE=ON
           cmake --build addon/build --config Release
       - name: Package vintage backend
         id: package
-        uses: ossia/actions/package-vintage-addon@master
+        uses: ossia/actions/package-vintage-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
@@ -675,21 +774,33 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: choco install -y jq zip ninja
-      - name: Download OSSIA SDK
-        id: ossia-sdk
-        uses: ossia/actions/download-ossia-sdk@master
+      - name: Checkout TouchDesigner SDK headers
+        uses: actions/checkout@v4
+        with:
+          repository: jcelerier/CustomOperatorSamples
+          ref: add-pop-headers
+          path: touchdesigner-sdk
+      - name: Set up Boost
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ossia/score-sdk/releases/download/sdk31/boost_1_90_0.tar.gz -o boost.tar.gz
+          mkdir -p boost/include
+          tar -xzf boost.tar.gz --strip-components=1 -C boost/include
       - name: Configure & build
         shell: bash
         run: |
           set -euo pipefail
           cmake -S addon -B addon/build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DTOUCHDESIGNER_SDK_PATH="$PWD/touchdesigner-sdk" \
+            -DBOOST_ROOT="$PWD/boost" \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
             -DAVND_ENABLE_TOUCHDESIGNER=ON
           cmake --build addon/build --config Release
       - name: Package touchdesigner backend
         id: package
-        uses: ossia/actions/package-touchdesigner-addon@master
+        uses: ossia/actions/package-touchdesigner-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
@@ -742,7 +853,9 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq python3-dev jq zip
+          sudo apt install -yqq gcc-14 g++-14 python3-dev jq zip
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -751,21 +864,31 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: choco install -y jq zip ninja
-      - name: Download OSSIA SDK
-        id: ossia-sdk
-        uses: ossia/actions/download-ossia-sdk@master
+      - name: Install pybind11
+        shell: bash
+        run: python -m pip install --upgrade pip pybind11
+      - name: Set up Boost
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ossia/score-sdk/releases/download/sdk31/boost_1_90_0.tar.gz -o boost.tar.gz
+          mkdir -p boost/include
+          tar -xzf boost.tar.gz --strip-components=1 -C boost/include
       - name: Configure & build
         shell: bash
         run: |
           set -euo pipefail
           cmake -S addon -B addon/build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DPython_EXECUTABLE="$(python -c 'import sys; print(sys.executable)')" \
+            -Dpybind11_DIR="$(python -m pybind11 --cmakedir)" \
+            -DBOOST_ROOT="$PWD/boost" \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
             -DAVND_ENABLE_PYTHON=ON
           cmake --build addon/build --config Release
       - name: Package python backend
         id: package
-        uses: ossia/actions/package-python-addon@master
+        uses: ossia/actions/package-python-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
@@ -815,7 +938,9 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq libgl-dev jq zip
+          sudo apt install -yqq gcc-14 g++-14 libgl-dev jq zip
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -824,21 +949,26 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: choco install -y jq zip ninja
-      - name: Download OSSIA SDK
-        id: ossia-sdk
-        uses: ossia/actions/download-ossia-sdk@master
+      - name: Set up Boost
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ossia/score-sdk/releases/download/sdk31/boost_1_90_0.tar.gz -o boost.tar.gz
+          mkdir -p boost/include
+          tar -xzf boost.tar.gz --strip-components=1 -C boost/include
       - name: Configure & build
         shell: bash
         run: |
           set -euo pipefail
           cmake -S addon -B addon/build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DBOOST_ROOT="$PWD/boost" \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
             -DAVND_ENABLE_GODOT=ON
           cmake --build addon/build --config Release
       - name: Package godot backend
         id: package
-        uses: ossia/actions/package-godot-addon@master
+        uses: ossia/actions/package-godot-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
@@ -878,7 +1008,7 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq zip unzip
+          sudo apt install -yqq gcc-14 g++-14 zip unzip
       - name: Merge per-OS Godot artifacts
         shell: bash
         run: |
@@ -971,7 +1101,9 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq libgl-dev libx11-dev jq zip
+          sudo apt install -yqq gcc-14 g++-14 libgl-dev libx11-dev jq zip
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -980,21 +1112,26 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: choco install -y jq zip ninja
-      - name: Download OSSIA SDK
-        id: ossia-sdk
-        uses: ossia/actions/download-ossia-sdk@master
+      - name: Set up Boost
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ossia/score-sdk/releases/download/sdk31/boost_1_90_0.tar.gz -o boost.tar.gz
+          mkdir -p boost/include
+          tar -xzf boost.tar.gz --strip-components=1 -C boost/include
       - name: Configure & build
         shell: bash
         run: |
           set -euo pipefail
           cmake -S addon -B addon/build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DBOOST_ROOT="$PWD/boost" \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
             -DAVND_ENABLE_STANDALONE=ON
           cmake --build addon/build --config Release
       - name: Package standalone backend
         id: package
-        uses: ossia/actions/package-standalone-addon@master
+        uses: ossia/actions/package-standalone-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
@@ -1039,26 +1176,49 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev jq zip
+          sudo apt install -yqq gcc-14 g++-14 libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            libglib2.0-dev libjson-glib-dev libsoup2.4-dev pkg-config jq zip
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         shell: bash
-        run: brew install gstreamer gst-plugins-base jq || true
-      - name: Download OSSIA SDK
-        id: ossia-sdk
-        uses: ossia/actions/download-ossia-sdk@master
+        run: brew install gstreamer gst-plugins-base json-glib libsoup@2 jq || true
+      - name: Set up Boost
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ossia/score-sdk/releases/download/sdk31/boost_1_90_0.tar.gz -o boost.tar.gz
+          mkdir -p boost/include
+          tar -xzf boost.tar.gz --strip-components=1 -C boost/include
       - name: Configure & build
         shell: bash
         run: |
           set -euo pipefail
+          GST_LINKARGS=()
+          if [[ "${RUNNER_OS:-}" == "macOS" ]]; then
+            # Homebrew's pkg-config doesn't always propagate the keg -L path into
+            # CMake's PkgConfig:: imported target, so the linker can't find
+            # libgstsdp-1.0.dylib etc. Add brew's lib dir + the pkgconfig path
+            # explicitly. PKG_CONFIG_PATH covers libsoup@2 (keg-only).
+            BREW_PREFIX="$(brew --prefix)"
+            export PKG_CONFIG_PATH="$BREW_PREFIX/opt/libsoup@2/lib/pkgconfig:$BREW_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            GST_LINKARGS=(
+              -DCMAKE_MODULE_LINKER_FLAGS="-L$BREW_PREFIX/lib"
+              -DCMAKE_SHARED_LINKER_FLAGS="-L$BREW_PREFIX/lib"
+              -DCMAKE_EXE_LINKER_FLAGS="-L$BREW_PREFIX/lib"
+            )
+          fi
           cmake -S addon -B addon/build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DBOOST_ROOT="$PWD/boost" \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
+            ${GST_LINKARGS[@]+"${GST_LINKARGS[@]}"} \
             -DAVND_ENABLE_GSTREAMER=ON
           cmake --build addon/build --config Release
       - name: Package gstreamer backend
         id: package
-        uses: ossia/actions/package-gstreamer-addon@master
+        uses: ossia/actions/package-gstreamer-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
@@ -1095,24 +1255,35 @@ jobs:
         shell: bash
         run: |
           sudo apt -y update
-          sudo apt install -yqq jq zip
+          sudo apt install -yqq gcc-14 g++-14 jq zip
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
       - name: Setup emsdk
         uses: mymindstorm/setup-emsdk@v14
-      - name: Download OSSIA SDK
-        id: ossia-sdk
-        uses: ossia/actions/download-ossia-sdk@master
+      - name: Set up Boost
+        shell: bash
+        run: |
+          curl -fsSL https://github.com/ossia/score-sdk/releases/download/sdk31/boost_1_90_0.tar.gz -o boost.tar.gz
+          mkdir -p boost/include
+          tar -xzf boost.tar.gz --strip-components=1 -C boost/include
       - name: Configure & build
         shell: bash
         run: |
           set -euo pipefail
           emcmake cmake -S addon -B addon/build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DOSSIA_SDK=${{ steps.ossia-sdk.outputs.sdk-path }} \
+            -DBOOST_ROOT="$PWD/boost" \
+            -DBoost_INCLUDE_DIR="$PWD/boost/include" \
+            -DBoost_NO_BOOST_CMAKE=ON \
+            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
+            -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH \
+            -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=BOTH \
+            -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=BOTH \
             -DAVND_ENABLE_WASM=ON
           cmake --build addon/build --config Release
       - name: Package wasm backend
         id: package
-        uses: ossia/actions/package-wasm-addon@master
+        uses: ossia/actions/package-wasm-addon@drop-ossia-sdk-dep
         with:
           addon-name: ${{ github.event.repository.name }}
           addon-path: addon
