@@ -119,6 +119,13 @@ on:
         required: false
         type: boolean
         default: false
+      targets:
+        description: >-
+          Space-separated os/arch triples to build (e.g.
+          "linux/x86_64 windows/x86_64"). Empty = every platform.
+        required: false
+        default: ''
+        type: string
     secrets:
       MAC_CERT_B64:
         required: false
@@ -148,18 +155,115 @@ on:
 # for the ossia/score SDK bundle.
 
 jobs:
+  # ---------------- setup ----------------
+  # Holds each back-end's canonical OS/arch matrix and filters it by the
+  # `targets` platform allowlist (a space-separated list of <os-tag>/<arch-tag>
+  # triples). Each back-end build job consumes its filtered matrix via
+  # `fromJSON(needs.setup.outputs.matrix_<backend>)`. An empty `targets`
+  # preserves the previous behavior: every entry runs. This mirrors the
+  # setup-job + jq + `$GITHUB_OUTPUT` pattern used by score-addon.yml's
+  # builds-dev.yml / builds-sdk.yml / jit.yml.
+  setup:
+    name: Setup matrices
+    runs-on: ubuntu-latest
+    outputs:
+      matrix_pd: ${{ steps.filter.outputs.matrix_pd }}
+      matrix_max: ${{ steps.filter.outputs.matrix_max }}
+      matrix_vst3: ${{ steps.filter.outputs.matrix_vst3 }}
+      matrix_clap: ${{ steps.filter.outputs.matrix_clap }}
+      matrix_vintage: ${{ steps.filter.outputs.matrix_vintage }}
+      matrix_touchdesigner: ${{ steps.filter.outputs.matrix_touchdesigner }}
+      matrix_python: ${{ steps.filter.outputs.matrix_python }}
+      matrix_godot: ${{ steps.filter.outputs.matrix_godot }}
+      matrix_standalone: ${{ steps.filter.outputs.matrix_standalone }}
+      matrix_gstreamer: ${{ steps.filter.outputs.matrix_gstreamer }}
+      matrix_wasm: ${{ steps.filter.outputs.matrix_wasm }}
+    steps:
+      - name: Compute filtered build matrices
+        id: filter
+        shell: bash
+        env:
+          TARGETS: ${{ inputs.targets }}
+        run: |
+          set -euo pipefail
+          # Canonical matrix per back-end. The triple used for filtering is
+          # "<os-tag>/<arch-tag>".
+          pd='[
+            {"os":"ubuntu-24.04","os-tag":"linux","arch-tag":"x86_64"},
+            {"os":"macos-15","os-tag":"macos","arch-tag":"arm64"},
+            {"os":"windows-latest","os-tag":"windows","arch-tag":"x86_64"}
+          ]'
+          max='[
+            {"os":"macos-15","os-tag":"macos","arch-tag":"arm64"},
+            {"os":"windows-latest","os-tag":"windows","arch-tag":"x86_64"}
+          ]'
+          vst3='[
+            {"os":"ubuntu-24.04","os-tag":"linux","arch-tag":"x86_64"},
+            {"os":"macos-15","os-tag":"macos","arch-tag":"arm64"},
+            {"os":"windows-latest","os-tag":"windows","arch-tag":"x86_64"}
+          ]'
+          clap='[
+            {"os":"ubuntu-24.04","os-tag":"linux","arch-tag":"x86_64"},
+            {"os":"macos-15","os-tag":"macos","arch-tag":"arm64"},
+            {"os":"windows-latest","os-tag":"windows","arch-tag":"x86_64"}
+          ]'
+          vintage='[
+            {"os":"macos-15","os-tag":"macos","arch-tag":"arm64"},
+            {"os":"windows-latest","os-tag":"windows","arch-tag":"x86_64"}
+          ]'
+          touchdesigner='[
+            {"os":"macos-15","os-tag":"macos","arch-tag":"arm64"},
+            {"os":"windows-latest","os-tag":"windows","arch-tag":"x86_64"}
+          ]'
+          python='[
+            {"os":"ubuntu-24.04","os-tag":"linux","arch-tag":"x86_64"},
+            {"os":"macos-15","os-tag":"macos","arch-tag":"arm64"},
+            {"os":"windows-latest","os-tag":"windows","arch-tag":"x86_64"}
+          ]'
+          godot='[
+            {"os":"ubuntu-24.04","os-tag":"linux","arch-tag":"x86_64"},
+            {"os":"macos-15","os-tag":"macos","arch-tag":"arm64"},
+            {"os":"windows-latest","os-tag":"windows","arch-tag":"x86_64"}
+          ]'
+          standalone='[
+            {"os":"ubuntu-24.04","os-tag":"linux","arch-tag":"x86_64"},
+            {"os":"macos-15","os-tag":"macos","arch-tag":"arm64"},
+            {"os":"windows-latest","os-tag":"windows","arch-tag":"x86_64"}
+          ]'
+          gstreamer='[
+            {"os":"ubuntu-24.04","os-tag":"linux","arch-tag":"x86_64"},
+            {"os":"macos-15","os-tag":"macos","arch-tag":"arm64"}
+          ]'
+          wasm='[
+            {"os":"ubuntu-24.04","os-tag":"linux","arch-tag":"x86_64"}
+          ]'
+
+          # Filter one back-end matrix by $TARGETS. Empty targets = keep all.
+          filter() {
+            local configs="$1"
+            if [ -z "${TARGETS// }" ]; then
+              jq -c . <<< "$configs"
+            else
+              jq -c --arg t "$TARGETS" \
+                '[ .[] | select( (."os-tag" + "/" + ."arch-tag") as $tr | ($t | split(" ") | map(select(. != ""))) | index($tr) ) ]' \
+                <<< "$configs"
+            fi
+          }
+
+          for backend in pd max vst3 clap vintage touchdesigner python godot standalone gstreamer wasm; do
+            echo "matrix_${backend}=$(filter "${!backend}")" >> "$GITHUB_OUTPUT"
+          done
+
   # ---------------- pd ----------------
   pd:
     name: "pd (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
-    if: ${{ inputs.pd }}
+    if: ${{ inputs.pd && needs.setup.outputs.matrix_pd != '[]' }}
+    needs: setup
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: ubuntu-24.04,    os-tag: linux,   arch-tag: x86_64 }
-          - { os: macos-15,        os-tag: macos,   arch-tag: arm64  }
-          - { os: windows-latest,  os-tag: windows, arch-tag: x86_64 }
+        include: ${{ fromJSON(needs.setup.outputs.matrix_pd) }}
     steps:
       - name: Support longpaths
         if: runner.os == 'Windows'
@@ -320,14 +424,13 @@ jobs:
   # ---------------- max ----------------
   max:
     name: "max (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
-    if: ${{ inputs.max }}
+    if: ${{ inputs.max && needs.setup.outputs.matrix_max != '[]' }}
+    needs: setup
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: macos-15,        os-tag: macos,   arch-tag: arm64  }
-          - { os: windows-latest,  os-tag: windows, arch-tag: x86_64 }
+        include: ${{ fromJSON(needs.setup.outputs.matrix_max) }}
     steps:
       - name: Support longpaths
         if: runner.os == 'Windows'
@@ -488,15 +591,13 @@ jobs:
   # ---------------- vst3 ----------------
   vst3:
     name: "vst3 (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
-    if: ${{ inputs.vst3 }}
+    if: ${{ inputs.vst3 && needs.setup.outputs.matrix_vst3 != '[]' }}
+    needs: setup
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: ubuntu-24.04,    os-tag: linux,   arch-tag: x86_64 }
-          - { os: macos-15,        os-tag: macos,   arch-tag: arm64  }
-          - { os: windows-latest,  os-tag: windows, arch-tag: x86_64 }
+        include: ${{ fromJSON(needs.setup.outputs.matrix_vst3) }}
     steps:
       - name: Support longpaths
         if: runner.os == 'Windows'
@@ -588,15 +689,13 @@ jobs:
   # ---------------- clap ----------------
   clap:
     name: "clap (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
-    if: ${{ inputs.clap }}
+    if: ${{ inputs.clap && needs.setup.outputs.matrix_clap != '[]' }}
+    needs: setup
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: ubuntu-24.04,    os-tag: linux,   arch-tag: x86_64 }
-          - { os: macos-15,        os-tag: macos,   arch-tag: arm64  }
-          - { os: windows-latest,  os-tag: windows, arch-tag: x86_64 }
+        include: ${{ fromJSON(needs.setup.outputs.matrix_clap) }}
     steps:
       - name: Support longpaths
         if: runner.os == 'Windows'
@@ -674,14 +773,13 @@ jobs:
   # ---------------- vintage ----------------
   vintage:
     name: "vintage (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
-    if: ${{ inputs.vintage }}
+    if: ${{ inputs.vintage && needs.setup.outputs.matrix_vintage != '[]' }}
+    needs: setup
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: macos-15,        os-tag: macos,   arch-tag: arm64  }
-          - { os: windows-latest,  os-tag: windows, arch-tag: x86_64 }
+        include: ${{ fromJSON(needs.setup.outputs.matrix_vintage) }}
     steps:
       - name: Support longpaths
         if: runner.os == 'Windows'
@@ -745,14 +843,13 @@ jobs:
   # ---------------- touchdesigner ----------------
   touchdesigner:
     name: "touchdesigner (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
-    if: ${{ inputs.touchdesigner }}
+    if: ${{ inputs.touchdesigner && needs.setup.outputs.matrix_touchdesigner != '[]' }}
+    needs: setup
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: macos-15,        os-tag: macos,   arch-tag: arm64  }
-          - { os: windows-latest,  os-tag: windows, arch-tag: x86_64 }
+        include: ${{ fromJSON(needs.setup.outputs.matrix_touchdesigner) }}
     steps:
       - name: Support longpaths
         if: runner.os == 'Windows'
@@ -823,15 +920,13 @@ jobs:
   # ---------------- python ----------------
   python:
     name: "python (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
-    if: ${{ inputs.python }}
+    if: ${{ inputs.python && needs.setup.outputs.matrix_python != '[]' }}
+    needs: setup
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: ubuntu-24.04,    os-tag: linux,   arch-tag: x86_64 }
-          - { os: macos-15,        os-tag: macos,   arch-tag: arm64  }
-          - { os: windows-latest,  os-tag: windows, arch-tag: x86_64 }
+        include: ${{ fromJSON(needs.setup.outputs.matrix_python) }}
     steps:
       - name: Support longpaths
         if: runner.os == 'Windows'
@@ -911,15 +1006,13 @@ jobs:
   # ---------------- godot ----------------
   godot:
     name: "godot (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
-    if: ${{ inputs.godot }}
+    if: ${{ inputs.godot && needs.setup.outputs.matrix_godot != '[]' }}
+    needs: setup
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: ubuntu-24.04,    os-tag: linux,   arch-tag: x86_64 }
-          - { os: macos-15,        os-tag: macos,   arch-tag: arm64  }
-          - { os: windows-latest,  os-tag: windows, arch-tag: x86_64 }
+        include: ${{ fromJSON(needs.setup.outputs.matrix_godot) }}
     steps:
       - name: Support longpaths
         if: runner.os == 'Windows'
@@ -1074,15 +1167,13 @@ jobs:
   # ---------------- standalone ----------------
   standalone:
     name: "standalone (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
-    if: ${{ inputs.standalone }}
+    if: ${{ inputs.standalone && needs.setup.outputs.matrix_standalone != '[]' }}
+    needs: setup
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: ubuntu-24.04,    os-tag: linux,   arch-tag: x86_64 }
-          - { os: macos-15,        os-tag: macos,   arch-tag: arm64  }
-          - { os: windows-latest,  os-tag: windows, arch-tag: x86_64 }
+        include: ${{ fromJSON(needs.setup.outputs.matrix_standalone) }}
     steps:
       - name: Support longpaths
         if: runner.os == 'Windows'
@@ -1154,14 +1245,13 @@ jobs:
   # ---------------- gstreamer ----------------
   gstreamer:
     name: "gstreamer (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
-    if: ${{ inputs.gstreamer }}
+    if: ${{ inputs.gstreamer && needs.setup.outputs.matrix_gstreamer != '[]' }}
+    needs: setup
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: ubuntu-24.04,    os-tag: linux,   arch-tag: x86_64 }
-          - { os: macos-15,        os-tag: macos,   arch-tag: arm64  }
+        include: ${{ fromJSON(needs.setup.outputs.matrix_gstreamer) }}
     steps:
       - uses: maxim-lobanov/setup-xcode@v1
         if: runner.os == 'macOS'
@@ -1239,13 +1329,13 @@ jobs:
   # ---------------- wasm ----------------
   wasm:
     name: "wasm (${{ matrix.os-tag }}/${{ matrix.arch-tag }})"
-    if: ${{ inputs.wasm }}
+    if: ${{ inputs.wasm && needs.setup.outputs.matrix_wasm != '[]' }}
+    needs: setup
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: ubuntu-24.04, os-tag: linux, arch-tag: x86_64 }
+        include: ${{ fromJSON(needs.setup.outputs.matrix_wasm) }}
     steps:
       - uses: actions/checkout@v4
         with:
