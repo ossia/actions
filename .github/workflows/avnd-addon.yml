@@ -146,6 +146,22 @@ on:
 # workflow works for addons whose dependencies.cmake just FetchContents
 # avendish (e.g. celtera/avendish-*-processor-template) without any need
 # for the ossia/score SDK bundle.
+#
+# Avendish's CMake defaults every AVND_ENABLE_<X> option to ON, so a job
+# that only passes its own enable flag would still build every other
+# backend (godot fetches godot-cpp, vst3 fetches the VST3 SDK, etc.) —
+# wasted work in every job. Each configure step therefore expands
+# ${AVND_OFF} (all backends OFF) BEFORE its own -DAVND_ENABLE_<ITS>=ON;
+# the last -D for a given cache variable wins, so only that backend builds.
+
+env:
+  # Disable every plugin backend; per-job configure re-enables just one.
+  AVND_OFF: >-
+    -DAVND_ENABLE_PD=OFF -DAVND_ENABLE_MAX=OFF -DAVND_ENABLE_VST3=OFF
+    -DAVND_ENABLE_CLAP=OFF -DAVND_ENABLE_VINTAGE=OFF
+    -DAVND_ENABLE_TOUCHDESIGNER=OFF -DAVND_ENABLE_PYTHON=OFF
+    -DAVND_ENABLE_GODOT=OFF -DAVND_ENABLE_STANDALONE=OFF
+    -DAVND_ENABLE_GSTREAMER=OFF -DAVND_ENABLE_WASM=OFF
 
 jobs:
   # ---------------- pd ----------------
@@ -234,6 +250,7 @@ jobs:
             -DBOOST_ROOT="$PWD/boost" \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
+            ${AVND_OFF} \
             -DAVND_ENABLE_PD=ON
           cmake --build addon/build --config Release
       - name: Package pd backend
@@ -371,6 +388,7 @@ jobs:
             -DBOOST_ROOT="$PWD/boost" \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
+            ${AVND_OFF} \
             -DAVND_ENABLE_MAX=ON
           cmake --build addon/build --config Release
       - name: Package max backend
@@ -560,6 +578,7 @@ jobs:
             -DBOOST_ROOT="$PWD/boost" \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
+            ${AVND_OFF} \
             -DAVND_ENABLE_VST3=ON \
             "${EXTRA[@]}"
           cmake --build addon/build --config Release
@@ -647,6 +666,7 @@ jobs:
             -DBOOST_ROOT="$PWD/boost" \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
+            ${AVND_OFF} \
             -DAVND_ENABLE_CLAP=ON
           cmake --build addon/build --config Release
       - name: Package clap backend
@@ -718,6 +738,7 @@ jobs:
             -DBOOST_ROOT="$PWD/boost" \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
+            ${AVND_OFF} \
             -DAVND_ENABLE_VINTAGE=ON
           cmake --build addon/build --config Release
       - name: Package vintage backend
@@ -796,6 +817,7 @@ jobs:
             -DBOOST_ROOT="$PWD/boost" \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
+            ${AVND_OFF} \
             -DAVND_ENABLE_TOUCHDESIGNER=ON
           cmake --build addon/build --config Release
       - name: Package touchdesigner backend
@@ -884,6 +906,7 @@ jobs:
             -DBOOST_ROOT="$PWD/boost" \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
+            ${AVND_OFF} \
             -DAVND_ENABLE_PYTHON=ON
           cmake --build addon/build --config Release
       - name: Package python backend
@@ -964,6 +987,7 @@ jobs:
             -DBOOST_ROOT="$PWD/boost" \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
+            ${AVND_OFF} \
             -DAVND_ENABLE_GODOT=ON
           cmake --build addon/build --config Release
       - name: Package godot backend
@@ -1127,6 +1151,7 @@ jobs:
             -DBOOST_ROOT="$PWD/boost" \
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
+            ${AVND_OFF} \
             -DAVND_ENABLE_STANDALONE=ON
           cmake --build addon/build --config Release
       - name: Package standalone backend
@@ -1214,6 +1239,7 @@ jobs:
             -DBoost_NO_BOOST_CMAKE=ON \
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
             ${GST_LINKARGS[@]+"${GST_LINKARGS[@]}"} \
+            ${AVND_OFF} \
             -DAVND_ENABLE_GSTREAMER=ON
           cmake --build addon/build --config Release
       - name: Package gstreamer backend
@@ -1279,6 +1305,7 @@ jobs:
             -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH \
             -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=BOTH \
             -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=BOTH \
+            ${AVND_OFF} \
             -DAVND_ENABLE_WASM=ON
           cmake --build addon/build --config Release
       - name: Package wasm backend
