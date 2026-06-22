@@ -260,4 +260,6 @@ runs:
         fi
         echo "Created zip: $PY_ZIP_PATH"
         ls -la "$PY_ZIP_PATH"
-        echo "zip-path=$PY_ZIP_PATH" >> "$GITHUB_OUTPUT"
+        ZIP_PATH_OUT="$PY_ZIP_PATH"
+        command -v cygpath >/dev/null 2>&1 && ZIP_PATH_OUT="$(cygpath -w "$PY_ZIP_PATH")"
+        echo "zip-path=$ZIP_PATH_OUT" >> "$GITHUB_OUTPUT"

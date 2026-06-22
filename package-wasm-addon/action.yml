@@ -180,4 +180,6 @@ runs:
         fi
         echo "Created zip: $WASM_ZIP_PATH"
         ls -la "$WASM_ZIP_PATH"
-        echo "zip-path=$WASM_ZIP_PATH" >> "$GITHUB_OUTPUT"
+        ZIP_PATH_OUT="$WASM_ZIP_PATH"
+        command -v cygpath >/dev/null 2>&1 && ZIP_PATH_OUT="$(cygpath -w "$WASM_ZIP_PATH")"
+        echo "zip-path=$ZIP_PATH_OUT" >> "$GITHUB_OUTPUT"

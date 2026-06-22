@@ -336,4 +336,6 @@ runs:
         fi
         echo "Created zip: $GD_ZIP_PATH"
         ls -la "$GD_ZIP_PATH"
-        echo "zip-path=$GD_ZIP_PATH" >> "$GITHUB_OUTPUT"
+        ZIP_PATH_OUT="$GD_ZIP_PATH"
+        command -v cygpath >/dev/null 2>&1 && ZIP_PATH_OUT="$(cygpath -w "$GD_ZIP_PATH")"
+        echo "zip-path=$ZIP_PATH_OUT" >> "$GITHUB_OUTPUT"
