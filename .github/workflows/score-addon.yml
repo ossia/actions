@@ -51,20 +51,34 @@ on:
         required: false
         default: true
         type: boolean
+      targets:
+        description: >-
+          Space-separated os/arch triples to build (e.g.
+          "linux/x86_64 windows/x86_64"). Empty = every platform.
+          Filters the dev / sdk / jit matrices; release is unaffected.
+        required: false
+        default: ''
+        type: string
 
 jobs:
   dev:
     if: inputs.dev
     uses: ossia/actions/.github/workflows/builds-dev.yml@master
     secrets: inherit
+    with:
+      targets: ${{ inputs.targets }}
   sdk:
     if: inputs.sdk
     uses: ossia/actions/.github/workflows/builds-sdk.yml@master
     secrets: inherit
+    with:
+      targets: ${{ inputs.targets }}
   jit:
     if: inputs.jit
     uses: ossia/actions/.github/workflows/jit.yml@master
     secrets: inherit
+    with:
+      targets: ${{ inputs.targets }}
   release:
     if: inputs.release
     uses: ossia/actions/.github/workflows/release.yml@master

@@ -2,33 +2,46 @@ name: CMake build (dev)
 
 on:
   workflow_call:
+    inputs:
+      targets:
+        description: 'Space-separated os/arch triples to build (empty = all).'
+        required: false
+        default: ''
+        type: string
 
 jobs:
+  setup:
+    name: Setup matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.filter.outputs.matrix }}
+    steps:
+      - name: Compute build matrix
+        id: filter
+        shell: bash
+        env:
+          TARGETS: ${{ inputs.targets }}
+        run: |
+          configs='[
+            {"name":"Windows","triple":"windows/x86_64","os":"windows-latest","dependencies":"curl -L -O https://github.com/ninja-build/ninja/releases/download/v1.13.1/ninja-win.zip && unzip ninja-win.zip","additional_flags":"-GNinja"},
+            {"name":"Ubuntu","triple":"linux/x86_64","os":"ubuntu-latest","dependencies":"sudo apt -y update; sudo apt install -yqq libgl-dev libgl1-mesa-dev libegl1-mesa-dev libdrm-dev libgbm-dev libxcomposite-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libxcb-*-dev libX11-*-dev libz-dev libtinfo6 libxext-dev","additional_flags":""},
+            {"name":"macOS","triple":"macos/arm64","os":"macos-15","dependencies":"","additional_flags":""}
+          ]'
+          if [ -z "${TARGETS// }" ]; then
+            matrix="$configs"
+          else
+            matrix=$(jq -c --arg t "$TARGETS" '[ .[] | select( .triple as $tr | ($t | split(" ") | map(select(. != ""))) | index($tr) ) ]' <<< "$configs")
+          fi
+          echo "matrix=$(jq -c . <<< "$matrix")" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: setup
     name: "Dev ${{ matrix.config.name }}"
     runs-on: ${{ matrix.config.os }}
     strategy:
       fail-fast: false
       matrix:
-        config:
-          - {
-              name: "Windows",
-              os: windows-latest,
-              dependencies: "curl -L -O https://github.com/ninja-build/ninja/releases/download/v1.13.1/ninja-win.zip && unzip ninja-win.zip",
-              additional_flags: "-GNinja"
-            }
-          - {
-              name: "Ubuntu",
-              os: ubuntu-latest,
-              dependencies: "sudo apt -y update; sudo apt install -yqq libgl-dev libgl1-mesa-dev libegl1-mesa-dev libdrm-dev libgbm-dev libxcomposite-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libxcb-*-dev libX11-*-dev libz-dev libtinfo6 libxext-dev",
-              additional_flags: ""
-            }
-          - {
-              name: "macOS",
-              os: macos-15,
-              dependencies: "",
-              additional_flags: ""
-            }
+        config: ${{ fromJSON(needs.setup.outputs.matrix) }}
     steps:
       - name: Support longpaths
         run: git config --global core.longpaths true
