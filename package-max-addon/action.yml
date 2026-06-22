@@ -323,4 +323,6 @@ runs:
           powershell -NoProfile -Command "Compress-Archive -Path '${{ inputs.addon-name }}' -DestinationPath '$ZIP_NAME' -Force"
         fi
         echo "Created zip: $ZIP_PATH"
-        echo "zip-path=$ZIP_PATH" >> "$GITHUB_OUTPUT"
+        ZIP_PATH_OUT="$ZIP_PATH"
+        command -v cygpath >/dev/null 2>&1 && ZIP_PATH_OUT="$(cygpath -w "$ZIP_PATH")"
+        echo "zip-path=$ZIP_PATH_OUT" >> "$GITHUB_OUTPUT"
