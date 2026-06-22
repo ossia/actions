@@ -2,9 +2,40 @@ name: JIT
 
 on:
   workflow_call:
+    inputs:
+      targets:
+        description: 'Space-separated os/arch triples to build (empty = all).'
+        required: false
+        default: ''
+        type: string
 
 jobs:
+  setup:
+    name: Setup matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.filter.outputs.matrix }}
+    steps:
+      - name: Compute build matrix
+        id: filter
+        shell: bash
+        env:
+          TARGETS: ${{ inputs.targets }}
+        run: |
+          configs='[
+            {"name":"Windows","triple":"windows/x86_64","os":"windows-latest"},
+            {"name":"Ubuntu","triple":"linux/x86_64","os":"ubuntu-latest"},
+            {"name":"macOS","triple":"macos/arm64","os":"macos-15"}
+          ]'
+          if [ -z "${TARGETS// }" ]; then
+            matrix="$configs"
+          else
+            matrix=$(jq -c --arg t "$TARGETS" '[ .[] | select( .triple as $tr | ($t | split(" ") | map(select(. != ""))) | index($tr) ) ]' <<< "$configs")
+          fi
+          echo "matrix=$(jq -c . <<< "$matrix")" >> "$GITHUB_OUTPUT"
+
   jit:
+    needs: setup
     name: "JIT ${{ matrix.config.name }} ${{ matrix.version }}"
     runs-on: ${{ matrix.config.os }}
     timeout-minutes: 10
@@ -12,10 +43,7 @@ jobs:
       fail-fast: false
       matrix:
         version: [ "latest", "continuous" ]
-        config:
-          - { name: "Windows", os: windows-latest }
-          - { name: "Ubuntu", os: ubuntu-latest }
-          - { name: "macOS", os: macos-15 }
+        config: ${{ fromJSON(needs.setup.outputs.matrix) }}
 
     steps:
       - name: Support longpaths
