@@ -494,8 +494,27 @@ jobs:
             ${AVND_OFF} \
             -DAVND_ENABLE_MAX=ON
           cmake --build addon/build --config Release
+      # If the addon's CMake assembled its own package (avnd_addon_package, e.g.
+      # to bundle a runtime dependency the bash packager can't know about), zip it
+      # and skip the bash packager. Backwards-compatible: addons that don't produce
+      # addon/build/package/<name>/ fall through to the package-max-addon action.
+      - name: Prefer CMake-built package (max)
+        id: cmakepkg
+        shell: bash
+        run: |
+          NAME="${{ github.event.repository.name }}"
+          if [ -d "addon/build/package/$NAME" ]; then
+            mkdir -p package
+            OUT="package/$NAME-max-${{ matrix.os-tag }}-${{ matrix.arch-tag }}.zip"
+            ( cd addon/build/package && cmake -E tar cf "$GITHUB_WORKSPACE/$OUT" --format=zip "$NAME" )
+            echo "zip-path=$OUT" >> "$GITHUB_OUTPUT"
+            echo "Using CMake-built package: $OUT"
+          else
+            echo "No CMake package dir; using the bash packager."
+          fi
       - name: Package max backend
         id: package
+        if: steps.cmakepkg.outputs.zip-path == ''
         uses: ossia/actions/package-max-addon@master
         with:
           addon-name: ${{ github.event.repository.name }}
@@ -514,7 +533,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: max-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
-          path: ${{ steps.package.outputs.zip-path }}
+          path: ${{ steps.cmakepkg.outputs.zip-path || steps.package.outputs.zip-path }}
 
   # ---------------- max-composite ----------------
   # Max Packages contain externals/<port>.mxo (macOS bundle) +
@@ -917,8 +936,27 @@ jobs:
             ${AVND_OFF} \
             -DAVND_ENABLE_TOUCHDESIGNER=ON
           cmake --build addon/build --config Release
+      # If the addon's CMake assembled its own package (avnd_addon_package, e.g.
+      # to bundle a runtime dependency the bash packager can't know about), zip it
+      # and skip the bash packager. Backwards-compatible: addons that don't produce
+      # addon/build/package/<name>/ fall through to the package-touchdesigner-addon action.
+      - name: Prefer CMake-built package (touchdesigner)
+        id: cmakepkg
+        shell: bash
+        run: |
+          NAME="${{ github.event.repository.name }}"
+          if [ -d "addon/build/package/$NAME" ]; then
+            mkdir -p package
+            OUT="package/$NAME-touchdesigner-${{ matrix.os-tag }}-${{ matrix.arch-tag }}.zip"
+            ( cd addon/build/package && cmake -E tar cf "$GITHUB_WORKSPACE/$OUT" --format=zip "$NAME" )
+            echo "zip-path=$OUT" >> "$GITHUB_OUTPUT"
+            echo "Using CMake-built package: $OUT"
+          else
+            echo "No CMake package dir; using the bash packager."
+          fi
       - name: Package touchdesigner backend
         id: package
+        if: steps.cmakepkg.outputs.zip-path == ''
         uses: ossia/actions/package-touchdesigner-addon@master
         with:
           addon-name: ${{ github.event.repository.name }}
@@ -937,7 +975,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: touchdesigner-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
-          path: ${{ steps.package.outputs.zip-path }}
+          path: ${{ steps.cmakepkg.outputs.zip-path || steps.package.outputs.zip-path }}
 
   # ---------------- python ----------------
   python:
@@ -1083,8 +1121,27 @@ jobs:
             ${AVND_OFF} \
             -DAVND_ENABLE_GODOT=ON
           cmake --build addon/build --config Release
+      # If the addon's CMake assembled its own package (avnd_addon_package, e.g.
+      # to bundle a runtime dependency the bash packager can't know about), zip it
+      # and skip the bash packager. Backwards-compatible: addons that don't produce
+      # addon/build/package/<name>/ fall through to the package-godot-addon action.
+      - name: Prefer CMake-built package (godot)
+        id: cmakepkg
+        shell: bash
+        run: |
+          NAME="${{ github.event.repository.name }}"
+          if [ -d "addon/build/package/$NAME" ]; then
+            mkdir -p package
+            OUT="package/$NAME-godot-${{ matrix.os-tag }}-${{ matrix.arch-tag }}.zip"
+            ( cd addon/build/package && cmake -E tar cf "$GITHUB_WORKSPACE/$OUT" --format=zip "$NAME" )
+            echo "zip-path=$OUT" >> "$GITHUB_OUTPUT"
+            echo "Using CMake-built package: $OUT"
+          else
+            echo "No CMake package dir; using the bash packager."
+          fi
       - name: Package godot backend
         id: package
+        if: steps.cmakepkg.outputs.zip-path == ''
         uses: ossia/actions/package-godot-addon@master
         with:
           addon-name: ${{ github.event.repository.name }}
@@ -1103,7 +1160,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: godot-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
-          path: ${{ steps.package.outputs.zip-path }}
+          path: ${{ steps.cmakepkg.outputs.zip-path || steps.package.outputs.zip-path }}
 
   # ---------------- godot-composite ----------------
   # Godot expects a single addons/<name>/ folder containing the
