@@ -48,12 +48,18 @@
   // ------------------------------------------------------------------
   // Grouping — the key to keeping CI cheap. Since every PR triggers a
   // build that takes hours, we collapse updates into as few PRs as
-  // possible: one combined PR per repo for everything routine, and a
-  // separate PR for avendish (the dependency we actually track, kept
-  // isolated so an unrelated update can't block it). To collapse even
-  // further (a single PR per repo, avendish included), delete the second
-  // rule below.
+  // possible:
+  //   - `separateMajorMinor: false` puts major updates in the same PR as
+  //     minor/patch (rather than a separate renovate/major-* PR), because
+  //     build cost outweighs isolating majors here;
+  //   - the packageRules below then bundle everything in a repo into one
+  //     "all" PR, keeping only avendish separate (the dependency we track,
+  //     so an unrelated bump can't block it).
+  // Net: ~one combined PR per repo, plus the avendish PR where present.
+  // To also fold avendish in (a single PR per repo), delete the second
+  // rule. To go back to isolating majors, remove `separateMajorMinor`.
   // ------------------------------------------------------------------
+  separateMajorMinor: false,
   packageRules: [
     {
       matchPackageNames: ["*"],
