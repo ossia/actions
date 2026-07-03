@@ -1,0 +1,69 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+
+  // ==================================================================
+  // Self-hosted (global) options — how the runner discovers repos.
+  // ==================================================================
+  platform: "github",
+  autodiscover: true,
+
+  // Which repositories to manage. Globs, minimatch syntax. This is the one
+  // knob to widen/narrow coverage; the token must have access to whatever
+  // matches. Scoped to the avendish plugin families by default.
+  autodiscoverFilter: [
+    "ossia/score-addon-*",
+    "celtera/*",
+    "sat-mtl/carto-tcp-avendish",
+  ],
+
+  // Run the inherited config below directly on every matched repo, without
+  // requiring each repo to merge an onboarding PR first. Flip to
+  // `onboarding: true` + `requireConfig: "required"` if you'd rather each
+  // repo opt in by merging a Renovate onboarding PR.
+  onboarding: false,
+  requireConfig: "optional",
+
+  gitAuthor: "ossia-renovate-bot <renovate@ossia.io>",
+
+  // ==================================================================
+  // Config inherited by every managed repository.
+  // ==================================================================
+  extends: [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits",
+    ":disableRateLimiting",
+  ],
+  labels: ["dependencies"],
+  prConcurrentLimit: 5,
+
+  // avendish (and any other vendored submodule) pinned as a git submodule:
+  // bump the recorded commit when the submodule's branch moves.
+  "git-submodules": { enabled: true, versioning: "git" },
+
+  // CMake FetchContent / ExternalProject pins. Two mutually-exclusive
+  // managers so a commit pin and a version-tag pin are handled correctly:
+  customManagers: [
+    // (1) commit pin: GIT_TAG <40-hex>  → git-refs digest, tracked on `main`.
+    //     This is how avendish is pinned in the plugin CMakeLists; the PR
+    //     advances the digest when celtera/avendish@main moves.
+    {
+      customType: "regex",
+      managerFilePatterns: ["/CMakeLists\\.txt$/", "/\\.cmake$/"],
+      matchStrings: [
+        "GIT_REPOSITORY\\s+\"?https://github\\.com/(?<depName>[^\\s\"]+?)(?:\\.git)?\"?\\s+GIT_TAG\\s+(?<currentDigest>[0-9a-f]{7,40})",
+      ],
+      currentValueTemplate: "main",
+      datasourceTemplate: "git-refs",
+    },
+    // (2) version-tag pin: GIT_TAG v1.2.3 / 1.2.3  → github-tags.
+    {
+      customType: "regex",
+      managerFilePatterns: ["/CMakeLists\\.txt$/", "/\\.cmake$/"],
+      matchStrings: [
+        "GIT_REPOSITORY\\s+\"?https://github\\.com/(?<depName>[^\\s\"]+?)(?:\\.git)?\"?\\s+GIT_TAG\\s+(?<currentValue>v[\\w.-]+|[0-9]+\\.[\\w.-]+)",
+      ],
+      datasourceTemplate: "github-tags",
+    },
+  ],
+}
