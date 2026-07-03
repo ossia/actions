@@ -46,17 +46,20 @@
   customManagers: [
     // (1) commit pin: GIT_TAG <40-hex>  → git-refs digest, tracked on `main`.
     //     This is how avendish is pinned in the plugin CMakeLists; the PR
-    //     advances the digest when celtera/avendish@main moves.
+    //     advances the digest when celtera/avendish@main moves. git-refs does
+    //     `git ls-remote <packageName>`, so packageName must be the full URL.
     {
       customType: "regex",
       managerFilePatterns: ["/CMakeLists\\.txt$/", "/\\.cmake$/"],
       matchStrings: [
         "GIT_REPOSITORY\\s+\"?https://github\\.com/(?<depName>[^\\s\"]+?)(?:\\.git)?\"?\\s+GIT_TAG\\s+(?<currentDigest>[0-9a-f]{7,40})",
       ],
+      packageNameTemplate: "https://github.com/{{{depName}}}",
       currentValueTemplate: "main",
       datasourceTemplate: "git-refs",
     },
     // (2) version-tag pin: GIT_TAG v1.2.3 / 1.2.3  → github-tags.
+    //     github-tags accepts the owner/repo short form directly.
     {
       customType: "regex",
       managerFilePatterns: ["/CMakeLists\\.txt$/", "/\\.cmake$/"],
