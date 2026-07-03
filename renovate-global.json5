@@ -32,14 +32,40 @@
     "config:recommended",
     ":dependencyDashboard",
     ":semanticCommits",
-    ":disableRateLimiting",
   ],
   labels: ["dependencies"],
+
+  // Throttle so we don't flood CI: at most a handful of open PRs / new
+  // branches per repo at a time (each branch = one CI build).
   prConcurrentLimit: 5,
+  branchConcurrentLimit: 5,
+  prHourlyLimit: 2,
 
   // avendish (and any other vendored submodule) pinned as a git submodule:
   // bump the recorded commit when the submodule's branch moves.
   "git-submodules": { enabled: true, versioning: "git" },
+
+  // ------------------------------------------------------------------
+  // Grouping — the key to keeping CI cheap. Since every PR triggers a
+  // build that takes hours, we collapse updates into as few PRs as
+  // possible: one combined PR per repo for everything routine, and a
+  // separate PR for avendish (the dependency we actually track, kept
+  // isolated so an unrelated update can't block it). To collapse even
+  // further (a single PR per repo, avendish included), delete the second
+  // rule below.
+  // ------------------------------------------------------------------
+  packageRules: [
+    {
+      matchPackageNames: ["*"],
+      groupName: "all dependencies",
+      groupSlug: "all",
+    },
+    {
+      matchPackageNames: ["/celtera\\/avendish/"],
+      groupName: "avendish",
+      groupSlug: "avendish",
+    },
+  ],
 
   // CMake FetchContent / ExternalProject pins. Two mutually-exclusive
   // managers so a commit pin and a version-tag pin are handled correctly:
