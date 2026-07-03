@@ -1,0 +1,45 @@
+name: renovate
+
+on:
+  schedule:
+    # weekdays, 04:00 UTC
+    - cron: "0 4 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run = preview only (no PRs); apply = create PRs"
+        type: choice
+        options: [dry-run, apply]
+        default: dry-run
+      logLevel:
+        description: "Renovate log level"
+        type: choice
+        options: [info, debug]
+        default: info
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renovate
+  cancel-in-progress: false
+
+jobs:
+  renovate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: renovatebot/github-action@v46.1.17
+        with:
+          configurationFile: renovate-global.json5
+          # PAT with contents + pull-requests write on the target repos across
+          # the ossia / celtera / sat-mtl orgs. The default GITHUB_TOKEN cannot
+          # reach other repositories, so autodiscover needs this.
+          token: ${{ secrets.RENOVATE_TOKEN }}
+        env:
+          LOG_LEVEL: ${{ github.event.inputs.logLevel || 'info' }}
+          # scheduled runs create PRs; a manual run only creates PRs when
+          # explicitly launched with mode=apply, otherwise it is a dry run.
+          RENOVATE_DRY_RUN: >-
+            ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'apply') && 'full' || '' }}
