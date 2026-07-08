@@ -1,0 +1,191 @@
+name: 'Package CMake-assembled avendish Addon'
+description: >-
+  Consume a package directory assembled by the addon's own CMake
+  (avnd_addon_package / the default in avnd_addon_finalize, i.e.
+  <build-dir>/package/<addon-name>/): code-sign + notarize its binaries the same
+  way the per-backend bash packagers do, then zip it. When no such directory
+  exists this is a no-op (empty zip-path output) and the caller falls back to the
+  bash packager. Signing is skipped for Pd (its externals are not signed) and
+  whenever the relevant certificate secret is absent (forks / PRs).
+
+inputs:
+  addon-name:
+    description: 'Addon name; the CMake package dir is <build-dir>/package/<addon-name>'
+    required: true
+  build-dir:
+    description: 'CMake build directory'
+    required: false
+    default: 'addon/build'
+  backend:
+    description: 'Backend being packaged: max | pd | python | touchdesigner | godot'
+    required: true
+  os-tag:
+    description: 'OS tag used in the zip name: linux | macos | windows'
+    required: true
+  arch-tag:
+    description: 'Arch tag used in the zip name: x86_64 | arm64'
+    required: true
+  macos-certificate-base64:
+    required: false
+    default: ''
+  macos-certificate-password:
+    required: false
+    default: ''
+  macos-notarize-team-id:
+    required: false
+    default: ''
+  macos-notarize-apple-id:
+    required: false
+    default: ''
+  macos-notarize-password:
+    required: false
+    default: ''
+  windows-certificate-base64:
+    required: false
+    default: ''
+  windows-certificate-password:
+    required: false
+    default: ''
+
+outputs:
+  zip-path:
+    description: 'Path to the assembled zip, or empty if no CMake package dir was present.'
+    value: ${{ steps.zip.outputs.zip-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Detect CMake-built package
+      id: detect
+      shell: bash
+      run: |
+        set -euo pipefail
+        NAME="${{ inputs.addon-name }}"
+        DIR="${{ inputs.build-dir }}/package/$NAME"
+        if [ -d "$DIR" ]; then
+          echo "has-dir=true" >> "$GITHUB_OUTPUT"
+          echo "pkg-dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "Found CMake-built package: $DIR"
+        else
+          echo "has-dir=false" >> "$GITHUB_OUTPUT"
+          echo "No CMake package dir ($DIR); the caller will use the bash packager."
+        fi
+
+    # --- macOS signing & notarization ---
+    # Replicates the inline pattern in package-{max,touchdesigner,godot,python}-addon,
+    # applied to every signable binary under the CMake package dir. Skipped for Pd.
+    - name: Import macOS code signing certificate
+      if: >-
+        runner.os == 'macOS' && steps.detect.outputs.has-dir == 'true'
+        && inputs.backend != 'pd' && inputs.macos-certificate-base64 != ''
+      uses: jcelerier/import-codesign-certs@master
+      with:
+        p12-file-base64: ${{ inputs.macos-certificate-base64 }}
+        p12-password: ${{ inputs.macos-certificate-password }}
+
+    - name: Sign macOS binaries
+      if: >-
+        runner.os == 'macOS' && steps.detect.outputs.has-dir == 'true'
+        && inputs.backend != 'pd' && inputs.macos-certificate-base64 != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        IDENTITY="ossia.io"
+        DIR="${{ steps.detect.outputs.pkg-dir }}"
+
+        # Bundles (.mxo external, .framework) — sign recursively.
+        while IFS= read -r -d '' b; do
+          echo "Signing bundle $b"
+          codesign --deep --force --options runtime --timestamp --sign "$IDENTITY" "$b"
+          codesign --verify --verbose=2 "$b" || true
+        done < <(find "$DIR" \( -name '*.mxo' -o -name '*.framework' \) -print0)
+
+        # Loose Mach-O (.dylib, py*.so and other .so plugins).
+        while IFS= read -r -d '' f; do
+          echo "Signing $f"
+          codesign --force --options runtime --timestamp --sign "$IDENTITY" "$f"
+          codesign --verify --verbose=2 "$f" || true
+        done < <(find "$DIR" -type f \( -name '*.dylib' -o -name '*.so' \) -print0)
+
+    - name: Notarize macOS bundles (best-effort)
+      if: >-
+        runner.os == 'macOS' && steps.detect.outputs.has-dir == 'true'
+        && inputs.backend != 'pd' && inputs.macos-certificate-base64 != ''
+        && inputs.macos-notarize-team-id != '' && inputs.macos-notarize-apple-id != ''
+        && inputs.macos-notarize-password != ''
+      shell: bash
+      run: |
+        # Non-fatal: signed-but-not-notarized artifacts still load.
+        set +e
+        DIR="${{ steps.detect.outputs.pkg-dir }}"
+        TEAM_ID="${{ inputs.macos-notarize-team-id }}"
+        APPLE_ID="${{ inputs.macos-notarize-apple-id }}"
+        APP_PWD="${{ inputs.macos-notarize-password }}"
+
+        # Stapleable bundles: notarize and staple each.
+        find "$DIR" \( -name '*.mxo' -o -name '*.framework' \) -print0 |
+        while IFS= read -r -d '' b; do
+          Z="${b}.notarize.zip"
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$b" "$Z"
+          echo "Notarizing bundle $b"
+          xcrun notarytool submit "$Z" --team-id "$TEAM_ID" --apple-id "$APPLE_ID" \
+            --password "$APP_PWD" --wait \
+            && xcrun stapler staple "$b" \
+            || echo "warning: notarization/stapling failed for $b; continuing"
+          rm -f "$Z"
+        done
+
+        # Loose .so/.dylib cannot be stapled; submit one zip to validate signatures.
+        if find "$DIR" -type f \( -name '*.dylib' -o -name '*.so' \) | grep -q .; then
+          TMPZIP="$(mktemp -u).zip"
+          ( cd "$DIR" && /usr/bin/ditto -c -k --keepParent . "$TMPZIP" )
+          echo "Notarizing loose Mach-O (best-effort)"
+          xcrun notarytool submit "$TMPZIP" --team-id "$TEAM_ID" --apple-id "$APPLE_ID" \
+            --password "$APP_PWD" --wait \
+            || echo "warning: notarization submission failed; continuing with signed-only artifacts"
+          rm -f "$TMPZIP"
+        fi
+
+    # --- Windows signing ---
+    - name: Sign Windows binaries
+      if: >-
+        runner.os == 'Windows' && steps.detect.outputs.has-dir == 'true'
+        && inputs.backend != 'pd' && inputs.windows-certificate-base64 != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        DIR="${{ steps.detect.outputs.pkg-dir }}"
+        PFX="$(mktemp -u).pfx"
+        echo "${{ inputs.windows-certificate-base64 }}" | base64 -d > "$PFX"
+
+        SIGNTOOL=""
+        if command -v signtool >/dev/null 2>&1; then
+          SIGNTOOL="signtool"
+        else
+          SIGNTOOL=$(find "/c/Program Files (x86)/Windows Kits/10/bin" -name signtool.exe 2>/dev/null | grep '/x64/' | sort -r | head -n1 || true)
+          [[ -z "$SIGNTOOL" ]] && SIGNTOOL=$(find "/c/Program Files (x86)/Windows Kits/10/bin" -name signtool.exe 2>/dev/null | sort -r | head -n1 || true)
+        fi
+        if [[ -z "$SIGNTOOL" ]]; then
+          echo "Error: signtool.exe not found"; exit 1
+        fi
+        echo "Using signtool: $SIGNTOOL"
+
+        while IFS= read -r -d '' f; do
+          echo "Signing $f"
+          "$SIGNTOOL" sign /f "$PFX" /p "${{ inputs.windows-certificate-password }}" \
+            /tr http://timestamp.digicert.com /td sha256 /fd sha256 "$f"
+        done < <(find "$DIR" -type f \( -name '*.mxe64' -o -name '*.dll' -o -name '*.pyd' \) -print0)
+        rm -f "$PFX"
+
+    - name: Zip CMake-built package
+      if: steps.detect.outputs.has-dir == 'true'
+      id: zip
+      shell: bash
+      run: |
+        set -euo pipefail
+        NAME="${{ inputs.addon-name }}"
+        mkdir -p package
+        OUT="package/$NAME-${{ inputs.backend }}-${{ inputs.os-tag }}-${{ inputs.arch-tag }}.zip"
+        ( cd "${{ inputs.build-dir }}/package" && cmake -E tar cf "$GITHUB_WORKSPACE/$OUT" --format=zip "$NAME" )
+        echo "zip-path=$OUT" >> "$GITHUB_OUTPUT"
+        echo "Assembled $OUT"
