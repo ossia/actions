@@ -357,8 +357,21 @@ jobs:
             ${AVND_OFF} \
             -DAVND_ENABLE_PD=ON
           cmake --build addon/build --config Release
+      # Pd externals are not code-signed, so the CMake package (which also carries
+      # the generated <name>-help.pd patches) is just zipped. Falls through to the
+      # bash packager when the addon produced no addon/build/package/<name>/.
+      - name: Prefer CMake-built package (pd)
+        id: cmakepkg
+        uses: ossia/actions/package-cmake-addon@master
+        with:
+          addon-name: ${{ github.event.repository.name }}
+          build-dir: addon/build
+          backend: pd
+          os-tag: ${{ matrix.os-tag }}
+          arch-tag: ${{ matrix.arch-tag }}
       - name: Package pd backend
         id: package
+        if: steps.cmakepkg.outputs.zip-path == ''
         uses: ossia/actions/package-pd-addon@master
         with:
           addon-name: ${{ github.event.repository.name }}
@@ -377,7 +390,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: pd-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
-          path: ${{ steps.package.outputs.zip-path }}
+          path: ${{ steps.cmakepkg.outputs.zip-path || steps.package.outputs.zip-path }}
 
   # ---------------- pd-composite ----------------
   # Pure Data via Deken expects a single cross-platform folder containing
@@ -494,24 +507,26 @@ jobs:
             ${AVND_OFF} \
             -DAVND_ENABLE_MAX=ON
           cmake --build addon/build --config Release
-      # If the addon's CMake assembled its own package (avnd_addon_package, e.g.
-      # to bundle a runtime dependency the bash packager can't know about), zip it
-      # and skip the bash packager. Backwards-compatible: addons that don't produce
-      # addon/build/package/<name>/ fall through to the package-max-addon action.
+      # If the addon's CMake assembled its own package (the default via
+      # avnd_addon_finalize, or an explicit avnd_addon_package call), sign + zip
+      # that and skip the bash packager. Backwards-compatible: addons that don't
+      # produce addon/build/package/<name>/ fall through to package-max-addon.
       - name: Prefer CMake-built package (max)
         id: cmakepkg
-        shell: bash
-        run: |
-          NAME="${{ github.event.repository.name }}"
-          if [ -d "addon/build/package/$NAME" ]; then
-            mkdir -p package
-            OUT="package/$NAME-max-${{ matrix.os-tag }}-${{ matrix.arch-tag }}.zip"
-            ( cd addon/build/package && cmake -E tar cf "$GITHUB_WORKSPACE/$OUT" --format=zip "$NAME" )
-            echo "zip-path=$OUT" >> "$GITHUB_OUTPUT"
-            echo "Using CMake-built package: $OUT"
-          else
-            echo "No CMake package dir; using the bash packager."
-          fi
+        uses: ossia/actions/package-cmake-addon@master
+        with:
+          addon-name: ${{ github.event.repository.name }}
+          build-dir: addon/build
+          backend: max
+          os-tag: ${{ matrix.os-tag }}
+          arch-tag: ${{ matrix.arch-tag }}
+          macos-certificate-base64: ${{ secrets.MAC_CERT_B64 }}
+          macos-certificate-password: ${{ secrets.MAC_CERT_PASSWORD }}
+          macos-notarize-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          macos-notarize-apple-id: ${{ secrets.APPLE_ID }}
+          macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
+          windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
+          windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
       - name: Package max backend
         id: package
         if: steps.cmakepkg.outputs.zip-path == ''
@@ -936,24 +951,26 @@ jobs:
             ${AVND_OFF} \
             -DAVND_ENABLE_TOUCHDESIGNER=ON
           cmake --build addon/build --config Release
-      # If the addon's CMake assembled its own package (avnd_addon_package, e.g.
-      # to bundle a runtime dependency the bash packager can't know about), zip it
-      # and skip the bash packager. Backwards-compatible: addons that don't produce
-      # addon/build/package/<name>/ fall through to the package-touchdesigner-addon action.
+      # If the addon's CMake assembled its own package (the default via
+      # avnd_addon_finalize, or an explicit avnd_addon_package call), sign + zip
+      # that and skip the bash packager. Backwards-compatible: addons that don't
+      # produce addon/build/package/<name>/ fall through to package-touchdesigner-addon.
       - name: Prefer CMake-built package (touchdesigner)
         id: cmakepkg
-        shell: bash
-        run: |
-          NAME="${{ github.event.repository.name }}"
-          if [ -d "addon/build/package/$NAME" ]; then
-            mkdir -p package
-            OUT="package/$NAME-touchdesigner-${{ matrix.os-tag }}-${{ matrix.arch-tag }}.zip"
-            ( cd addon/build/package && cmake -E tar cf "$GITHUB_WORKSPACE/$OUT" --format=zip "$NAME" )
-            echo "zip-path=$OUT" >> "$GITHUB_OUTPUT"
-            echo "Using CMake-built package: $OUT"
-          else
-            echo "No CMake package dir; using the bash packager."
-          fi
+        uses: ossia/actions/package-cmake-addon@master
+        with:
+          addon-name: ${{ github.event.repository.name }}
+          build-dir: addon/build
+          backend: touchdesigner
+          os-tag: ${{ matrix.os-tag }}
+          arch-tag: ${{ matrix.arch-tag }}
+          macos-certificate-base64: ${{ secrets.MAC_CERT_B64 }}
+          macos-certificate-password: ${{ secrets.MAC_CERT_PASSWORD }}
+          macos-notarize-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          macos-notarize-apple-id: ${{ secrets.APPLE_ID }}
+          macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
+          windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
+          windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
       - name: Package touchdesigner backend
         id: package
         if: steps.cmakepkg.outputs.zip-path == ''
@@ -1042,8 +1059,29 @@ jobs:
             ${AVND_OFF} \
             -DAVND_ENABLE_PYTHON=ON
           cmake --build addon/build --config Release
+      # If the addon's CMake assembled its own package (the default via
+      # avnd_addon_finalize), sign + zip it (it also carries the generated
+      # <c_name>_example.py under examples/). Falls through to package-python-addon
+      # when addon/build/package/<name>/ is absent.
+      - name: Prefer CMake-built package (python)
+        id: cmakepkg
+        uses: ossia/actions/package-cmake-addon@master
+        with:
+          addon-name: ${{ github.event.repository.name }}
+          build-dir: addon/build
+          backend: python
+          os-tag: ${{ matrix.os-tag }}
+          arch-tag: ${{ matrix.arch-tag }}
+          macos-certificate-base64: ${{ secrets.MAC_CERT_B64 }}
+          macos-certificate-password: ${{ secrets.MAC_CERT_PASSWORD }}
+          macos-notarize-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          macos-notarize-apple-id: ${{ secrets.APPLE_ID }}
+          macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
+          windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
+          windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
       - name: Package python backend
         id: package
+        if: steps.cmakepkg.outputs.zip-path == ''
         uses: ossia/actions/package-python-addon@master
         with:
           addon-name: ${{ github.event.repository.name }}
@@ -1062,7 +1100,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: python-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
-          path: ${{ steps.package.outputs.zip-path }}
+          path: ${{ steps.cmakepkg.outputs.zip-path || steps.package.outputs.zip-path }}
 
   # ---------------- godot ----------------
   godot:
@@ -1121,24 +1159,26 @@ jobs:
             ${AVND_OFF} \
             -DAVND_ENABLE_GODOT=ON
           cmake --build addon/build --config Release
-      # If the addon's CMake assembled its own package (avnd_addon_package, e.g.
-      # to bundle a runtime dependency the bash packager can't know about), zip it
-      # and skip the bash packager. Backwards-compatible: addons that don't produce
-      # addon/build/package/<name>/ fall through to the package-godot-addon action.
+      # If the addon's CMake assembled its own package (the default via
+      # avnd_addon_finalize, or an explicit avnd_addon_package call), sign + zip
+      # that and skip the bash packager. Backwards-compatible: addons that don't
+      # produce addon/build/package/<name>/ fall through to package-godot-addon.
       - name: Prefer CMake-built package (godot)
         id: cmakepkg
-        shell: bash
-        run: |
-          NAME="${{ github.event.repository.name }}"
-          if [ -d "addon/build/package/$NAME" ]; then
-            mkdir -p package
-            OUT="package/$NAME-godot-${{ matrix.os-tag }}-${{ matrix.arch-tag }}.zip"
-            ( cd addon/build/package && cmake -E tar cf "$GITHUB_WORKSPACE/$OUT" --format=zip "$NAME" )
-            echo "zip-path=$OUT" >> "$GITHUB_OUTPUT"
-            echo "Using CMake-built package: $OUT"
-          else
-            echo "No CMake package dir; using the bash packager."
-          fi
+        uses: ossia/actions/package-cmake-addon@master
+        with:
+          addon-name: ${{ github.event.repository.name }}
+          build-dir: addon/build
+          backend: godot
+          os-tag: ${{ matrix.os-tag }}
+          arch-tag: ${{ matrix.arch-tag }}
+          macos-certificate-base64: ${{ secrets.MAC_CERT_B64 }}
+          macos-certificate-password: ${{ secrets.MAC_CERT_PASSWORD }}
+          macos-notarize-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          macos-notarize-apple-id: ${{ secrets.APPLE_ID }}
+          macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
+          windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
+          windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
       - name: Package godot backend
         id: package
         if: steps.cmakepkg.outputs.zip-path == ''
