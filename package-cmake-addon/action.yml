@@ -61,14 +61,32 @@ runs:
       run: |
         set -euo pipefail
         NAME="${{ inputs.addon-name }}"
-        DIR="${{ inputs.build-dir }}/package/$NAME"
+        BASE="${{ inputs.build-dir }}/package"
+        DIR="$BASE/$NAME"
+        # avnd_addon_finalize names the package dir after the addon's CMake NAME
+        # (avnd_addon_init NAME / avnd_addon_package NAME), which need not equal the
+        # repo name -- e.g. a repo "avendish-audio-processor-template" whose addon is
+        # NAME MyAudioAddon produces package/MyAudioAddon/. Prefer an exact repo-name
+        # match; otherwise, if exactly one package dir exists, use it. Without this the
+        # exact-match miss silently drops us to the bash packager, which ships the
+        # externals but not the generated help/example patches the CMake package carries.
+        if [ ! -d "$DIR" ] && [ -d "$BASE" ]; then
+          mapfile -t _dirs < <(find "$BASE" -mindepth 1 -maxdepth 1 -type d | sort)
+          if [ "${#_dirs[@]}" -eq 1 ]; then
+            DIR="${_dirs[0]}"
+            echo "No package/$NAME; using the single CMake package dir $DIR"
+          elif [ "${#_dirs[@]}" -gt 1 ]; then
+            echo "Multiple package dirs under $BASE and none named $NAME:"
+            printf '  %s\n' "${_dirs[@]}"
+          fi
+        fi
         if [ -d "$DIR" ]; then
           echo "has-dir=true" >> "$GITHUB_OUTPUT"
           echo "pkg-dir=$DIR" >> "$GITHUB_OUTPUT"
           echo "Found CMake-built package: $DIR"
         else
           echo "has-dir=false" >> "$GITHUB_OUTPUT"
-          echo "No CMake package dir ($DIR); the caller will use the bash packager."
+          echo "No CMake package dir under $BASE; the caller will use the bash packager."
         fi
 
     # --- macOS signing & notarization ---
@@ -184,8 +202,15 @@ runs:
       run: |
         set -euo pipefail
         NAME="${{ inputs.addon-name }}"
+        SRC="${{ steps.detect.outputs.pkg-dir }}"
         mkdir -p package
         OUT="package/$NAME-${{ inputs.backend }}-${{ inputs.os-tag }}-${{ inputs.arch-tag }}.zip"
-        ( cd "${{ inputs.build-dir }}/package" && cmake -E tar cf "$GITHUB_WORKSPACE/$OUT" --format=zip "$NAME" )
+        # Normalize the archive's top-level dir to the repo name regardless of what the
+        # CMake package dir is called, so the composite-merge jobs (which look for
+        # <repo>/ inside each per-OS zip) and the fallback bash packagers stay consistent.
+        rm -rf staging && mkdir -p "staging/$NAME"
+        cp -R "$SRC/." "staging/$NAME/"
+        ( cd staging && cmake -E tar cf "$GITHUB_WORKSPACE/$OUT" --format=zip "$NAME" )
+        rm -rf staging
         echo "zip-path=$OUT" >> "$GITHUB_OUTPUT"
         echo "Assembled $OUT"
