@@ -71,13 +71,19 @@ runs:
         # exact-match miss silently drops us to the bash packager, which ships the
         # externals but not the generated help/example patches the CMake package carries.
         if [ ! -d "$DIR" ] && [ -d "$BASE" ]; then
-          mapfile -t _dirs < <(find "$BASE" -mindepth 1 -maxdepth 1 -type d | sort)
-          if [ "${#_dirs[@]}" -eq 1 ]; then
-            DIR="${_dirs[0]}"
+          # Portable single-dir detection. macOS runners default to bash 3.2, which
+          # has no `mapfile`, so iterate a glob instead (the -d guard skips the
+          # literal pattern when nothing matches; no nullglob needed).
+          _only=""; _n=0
+          for _d in "$BASE"/*/; do
+            [ -d "$_d" ] || continue
+            _only="${_d%/}"; _n=$((_n + 1))
+          done
+          if [ "$_n" -eq 1 ]; then
+            DIR="$_only"
             echo "No package/$NAME; using the single CMake package dir $DIR"
-          elif [ "${#_dirs[@]}" -gt 1 ]; then
-            echo "Multiple package dirs under $BASE and none named $NAME:"
-            printf '  %s\n' "${_dirs[@]}"
+          elif [ "$_n" -gt 1 ]; then
+            echo "Multiple package dirs under $BASE and none named $NAME; leaving to the bash packager."
           fi
         fi
         if [ -d "$DIR" ]; then
