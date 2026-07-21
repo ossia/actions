@@ -24,7 +24,7 @@ jobs:
         run: |
           configs='[
             {"name":"Windows","triple":"windows/x86_64","os":"windows-latest","dependencies":"curl -L -O https://github.com/ninja-build/ninja/releases/download/v1.13.1/ninja-win.zip && unzip ninja-win.zip","additional_flags":"-GNinja"},
-            {"name":"Ubuntu","triple":"linux/x86_64","os":"ubuntu-latest","dependencies":"sudo apt -y update; sudo apt install -yqq libgl-dev libgl1-mesa-dev libegl1-mesa-dev libdrm-dev libxcomposite-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libxcb-*-dev libX11-*-dev libz-dev libtinfo6 libxext-dev","additional_flags":""},
+            {"name":"Ubuntu","triple":"linux/x86_64","os":"ubuntu-latest","dependencies":"sudo apt -y update; sudo apt install -yqq libgl-dev libgl1-mesa-dev libegl1-mesa-dev libdrm-dev libgbm-dev libxcomposite-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libxcb-*-dev libX11-*-dev libz-dev libtinfo6 libxext-dev","additional_flags":""},
             {"name":"macOS","triple":"macos/arm64","os":"macos-15","dependencies":"","additional_flags":""}
           ]'
           if [ -z "${TARGETS// }" ]; then

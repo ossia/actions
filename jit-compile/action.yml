@@ -55,7 +55,9 @@ runs:
         else
           DOWNLOAD_URL="https://github.com/ossia/score/releases/download/v${{ steps.version.outputs.version }}/${{ steps.score-filename.outputs.filename }}"
         fi
-        curl -L -O "$DOWNLOAD_URL"
+        # -f so a renamed or missing asset fails here, instead of writing a
+        # short HTML error body that only blows up later in unzip/hdiutil.
+        curl -fL -O "$DOWNLOAD_URL"
 
     - name: Install score (macOS)
       if: runner.os == 'macOS'
@@ -74,14 +76,25 @@ runs:
       if: runner.os == 'Linux'
       shell: bash
       run: |
-        sudo apt -y install xvfb libasound2t64 libxcb1 libegl1 libgl1-mesa-dev libegl1-mesa-dev libglvnd0 libx11-6 libxcb-glx0 libgl1 libdbus-1-3 libxcb-xkb1 libxkbcommon-x11-0 libxcb-xkb1 libfuse2
+        # libv4l-0 and libbluetooth3 are required by the score AppImage itself:
+        # without them it aborts at startup with "MISSING LIBRARY!" before the
+        # addon is ever compiled.
+        sudo apt -y install xvfb libasound2t64 libxcb1 libegl1 libgl1-mesa-dev libegl1-mesa-dev libglvnd0 libx11-6 libxcb-glx0 libgl1 libdbus-1-3 libxcb-xkb1 libxkbcommon-x11-0 libxcb-xkb1 libfuse2 libv4l-0 libbluetooth3
         chmod +x ${{ steps.score-filename.outputs.filename }}
 
     - name: Set SDK path
       if: inputs.sdk-path != ''
       shell: bash
       run: |
-        echo "SCORE_JIT_SDK=$(realpath ${{ inputs.sdk-path }})" >> $GITHUB_ENV
+        # The path may be relative (./sdk/usr) or absolute; on Windows an
+        # absolute one arrives with backslashes, which bash would eat and
+        # realpath would then fail to resolve, silently leaving the variable
+        # empty. Normalize the separators, then resolve.
+        # Assign first: inlining the substitution into echo would let a failed
+        # resolve write an empty value and keep going.
+        SDK_IN="${{ inputs.sdk-path }}"
+        SDK_ABS="$(cd "${SDK_IN//\\//}" && pwd)"
+        echo "SCORE_JIT_SDK=$SDK_ABS" >> $GITHUB_ENV
 
     - name: Set environment
       shell: bash
