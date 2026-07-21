@@ -54,9 +54,14 @@ runs:
       shell: bash
       run: |
         export PATH=$PATH:$PWD
+        # Callers pass either a relative path (score) or an absolute one. On
+        # Windows an absolute path arrives with backslashes, which bash would
+        # eat, so normalize the separators before resolving.
+        SCORE_IN="${{ inputs.score-path }}"
+        SCORE_SRC="$(cd "${SCORE_IN//\\//}" && pwd)"
         cmake -S ${{ inputs.addon-path }} -B ${{ env.BUILD_DIR }} \
-          -DCMAKE_MODULE_PATH=$PWD/${{ inputs.score-path }}/cmake \
-          -DSCORE_SOURCE_DIR=$PWD/${{ inputs.score-path }} \
+          -DCMAKE_MODULE_PATH="$SCORE_SRC/cmake" \
+          -DSCORE_SOURCE_DIR="$SCORE_SRC" \
           -DOSSIA_SDK=${{ inputs.ossia-sdk-path }} \
           -DCMAKE_BUILD_TYPE=${{ inputs.build-type }} \
           -DCMAKE_UNITY_BUILD=1 \
@@ -69,19 +74,15 @@ runs:
       shell: bash
       run: |
         export PATH=$PATH:$PWD
-        echo " ! ! ! ! => " 
-        echo ${{ inputs.score-sdk-path }}/lib/cmake/score
-        echo "1:"
-        find . -name ScoreExternalAddon.cmake
-        echo "2:"
-        find . -name ScoreFunctions.cmake
-        echo "3:"
-        find ${{ inputs.score-sdk-path }} -name ScoreExternalAddon.cmake
-        echo "4:"
-        find ${{ inputs.score-sdk-path }} -name ScoreFunctions.cmake
+        # Callers pass either a relative path (./sdk/usr) or an absolute one
+        # under the runner temp dir. On Windows an absolute path arrives with
+        # backslashes, which bash would eat, so normalize the separators
+        # before resolving.
+        SDK_IN="${{ inputs.score-sdk-path }}"
+        SCORE_SDK="$(cd "${SDK_IN//\\//}" && pwd)"
         cmake -S ${{ inputs.addon-path }} -B ${{ env.BUILD_DIR }} \
-          -DCMAKE_MODULE_PATH=$PWD/${{ inputs.score-sdk-path }}/lib/cmake/score \
-          -DSCORE_SDK=$PWD/${{ inputs.score-sdk-path }} \
+          -DCMAKE_MODULE_PATH="$SCORE_SDK/lib/cmake/score" \
+          -DSCORE_SDK="$SCORE_SDK" \
           -DOSSIA_SDK=${{ inputs.ossia-sdk-path }} \
           -DCMAKE_BUILD_TYPE=${{ inputs.build-type }} \
           -DCMAKE_UNITY_BUILD=1 \
