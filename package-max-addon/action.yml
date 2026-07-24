@@ -213,7 +213,7 @@ runs:
     # --- macOS signing & notarization (inline pattern) ---
     - name: Import macOS code signing certificate
       if: runner.os == 'macOS' && inputs.macos-certificate-base64 != ''
-      uses: jcelerier/import-codesign-certs@master
+      uses: Apple-Actions/import-codesign-certs@v7
       with:
         p12-file-base64: ${{ inputs.macos-certificate-base64 }}
         p12-password: ${{ inputs.macos-certificate-password }}
