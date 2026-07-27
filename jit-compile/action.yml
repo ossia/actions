@@ -37,7 +37,12 @@ runs:
         fi
         
         if [[ "${{ runner.os }}" == "Windows" ]]; then
-          echo "filename=${PREFIX}-win64.exe" >> $GITHUB_OUTPUT
+          if [[ "${{ runner.arch }}" == "ARM64" ]]; then
+            WIN_ARCH=aarch64
+          else
+            WIN_ARCH=x86_64
+          fi
+          echo "filename=${PREFIX}-${WIN_ARCH}.exe" >> $GITHUB_OUTPUT
           echo "executable=./score.exe" >> $GITHUB_OUTPUT
         elif [[ "${{ runner.os }}" == "macOS" ]]; then
           echo "filename=${PREFIX}-macOS-AppleSilicon.dmg" >> $GITHUB_OUTPUT
@@ -55,7 +60,7 @@ runs:
         else
           DOWNLOAD_URL="https://github.com/ossia/score/releases/download/v${{ steps.version.outputs.version }}/${{ steps.score-filename.outputs.filename }}"
         fi
-        curl -L -O "$DOWNLOAD_URL"
+        curl -L -f -O "$DOWNLOAD_URL"
 
     - name: Install score (macOS)
       if: runner.os == 'macOS'
