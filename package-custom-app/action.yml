@@ -70,7 +70,7 @@ inputs:
     required: false
     default: 'packages'
   platforms:
-    description: 'Space-separated list of platforms to build for (linux-x86_64 linux-aarch64 macos-intel macos-arm windows). If empty, builds for current platform.'
+    description: 'Space-separated list of platforms to build for (linux-x86_64 linux-aarch64 macos-intel macos-arm windows wasm). If empty, builds for current platform. wasm produces a static web bundle and needs a Linux runner; with score-build-id it expects a build made with custom-score-build target-platform: wasm.'
     required: false
     default: ''
   score-repo:
@@ -257,7 +257,14 @@ runs:
     - name: Create custom app packages
       shell: bash
       run: |
-        if [[ "$RUNNER_OS" == "Linux" ]]; then
+        if [[ " ${{ inputs.platforms }} " == *" wasm "* ]]; then
+          export SCORE_LOCAL_INSTALLER=score-build/*.zip
+
+          if [[ -n "${{ inputs.qrc-file }}" ]]; then
+            RCC_PATH=$(find .. -name rcc -type f)
+            export PATH="$PATH:$PWD/$(dirname $RCC_PATH)"
+          fi
+        elif [[ "$RUNNER_OS" == "Linux" ]]; then
           export SCORE_LOCAL_INSTALLER=score-build/*.AppImage
 
           if [[ -n "${{ inputs.qrc-file }}" ]]; then
