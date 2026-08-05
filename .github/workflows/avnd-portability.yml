@@ -148,7 +148,7 @@ jobs:
   linux_gcc:
     name: "linux gcc (${{ matrix.compiler }})"
     if: ${{ inputs.linux_gcc }}
-    runs-on: [self-hosted, linux, x64, sat-builder]
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -187,7 +187,7 @@ jobs:
   linux_clang:
     name: "linux clang (${{ matrix.stdlib }})"
     if: ${{ inputs.linux_clang }}
-    runs-on: [self-hosted, linux, x64, sat-builder]
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -307,7 +307,7 @@ jobs:
   windows_mingw:
     name: "windows mingw (x86_64)"
     if: ${{ inputs.windows_mingw }}
-    runs-on: [self-hosted, linux, x64, sat-builder]
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -389,7 +389,7 @@ jobs:
   wasm:
     name: "wasm (emscripten)"
     if: ${{ inputs.wasm }}
-    runs-on: [self-hosted, linux, x64, sat-builder]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -426,7 +426,7 @@ jobs:
   android:
     name: "android (arm64-v8a)"
     if: ${{ inputs.android }}
-    runs-on: [self-hosted, linux, x64, sat-builder]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:

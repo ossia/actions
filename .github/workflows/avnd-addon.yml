@@ -181,7 +181,7 @@ jobs:
   # builds-dev.yml / builds-sdk.yml / jit.yml.
   setup:
     name: Setup matrices
-    runs-on: [self-hosted, linux, x64, sat-builder]
+    runs-on: ubuntu-latest
     outputs:
       matrix_pd: ${{ steps.filter.outputs.matrix_pd }}
       matrix_max: ${{ steps.filter.outputs.matrix_max }}
@@ -205,7 +205,7 @@ jobs:
           # Canonical matrix per back-end. The triple used for filtering is
           # "<os-tag>/<arch-tag>".
           pd='[
-            {"os":["self-hosted","linux","x64","sat-builder"],"os-tag":"linux","arch-tag":"x86_64"},
+            {"os":"ubuntu-24.04","os-tag":"linux","arch-tag":"x86_64"},
             {"os":"macos-15","os-tag":"macos","arch-tag":"arm64"},
             {"os":"windows-latest","os-tag":"windows","arch-tag":"x86_64"}
           ]'
@@ -214,12 +214,12 @@ jobs:
             {"os":"windows-latest","os-tag":"windows","arch-tag":"x86_64"}
           ]'
           vst3='[
-            {"os":["self-hosted","linux","x64","sat-builder"],"os-tag":"linux","arch-tag":"x86_64"},
+            {"os":"ubuntu-24.04","os-tag":"linux","arch-tag":"x86_64"},
             {"os":"macos-15","os-tag":"macos","arch-tag":"arm64"},
             {"os":"windows-latest","os-tag":"windows","arch-tag":"x86_64"}
           ]'
           clap='[
-            {"os":["self-hosted","linux","x64","sat-builder"],"os-tag":"linux","arch-tag":"x86_64"},
+            {"os":"ubuntu-24.04","os-tag":"linux","arch-tag":"x86_64"},
             {"os":"macos-15","os-tag":"macos","arch-tag":"arm64"},
             {"os":"windows-latest","os-tag":"windows","arch-tag":"x86_64"}
           ]'
@@ -232,26 +232,26 @@ jobs:
             {"os":"windows-latest","os-tag":"windows","arch-tag":"x86_64"}
           ]'
           python='[
-            {"os":["self-hosted","linux","x64","sat-builder"],"os-tag":"linux","arch-tag":"x86_64"},
+            {"os":"ubuntu-24.04","os-tag":"linux","arch-tag":"x86_64"},
             {"os":"macos-15","os-tag":"macos","arch-tag":"arm64"},
             {"os":"windows-latest","os-tag":"windows","arch-tag":"x86_64"}
           ]'
           godot='[
-            {"os":["self-hosted","linux","x64","sat-builder"],"os-tag":"linux","arch-tag":"x86_64"},
+            {"os":"ubuntu-24.04","os-tag":"linux","arch-tag":"x86_64"},
             {"os":"macos-15","os-tag":"macos","arch-tag":"arm64"},
             {"os":"windows-latest","os-tag":"windows","arch-tag":"x86_64"}
           ]'
           standalone='[
-            {"os":["self-hosted","linux","x64","sat-builder"],"os-tag":"linux","arch-tag":"x86_64"},
+            {"os":"ubuntu-24.04","os-tag":"linux","arch-tag":"x86_64"},
             {"os":"macos-15","os-tag":"macos","arch-tag":"arm64"},
             {"os":"windows-latest","os-tag":"windows","arch-tag":"x86_64"}
           ]'
           gstreamer='[
-            {"os":["self-hosted","linux","x64","sat-builder"],"os-tag":"linux","arch-tag":"x86_64"},
+            {"os":"ubuntu-24.04","os-tag":"linux","arch-tag":"x86_64"},
             {"os":"macos-15","os-tag":"macos","arch-tag":"arm64"}
           ]'
           wasm='[
-            {"os":["self-hosted","linux","x64","sat-builder"],"os-tag":"linux","arch-tag":"x86_64"}
+            {"os":"ubuntu-24.04","os-tag":"linux","arch-tag":"x86_64"}
           ]'
 
           # Filter one back-end matrix by $TARGETS. Empty targets = keep all.
@@ -399,7 +399,7 @@ jobs:
   pd-composite:
     if: ${{ inputs.pd }}
     needs: pd
-    runs-on: [self-hosted, linux, x64, sat-builder]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -558,7 +558,7 @@ jobs:
   max-composite:
     if: ${{ inputs.max }}
     needs: max
-    runs-on: [self-hosted, linux, x64, sat-builder]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -1211,7 +1211,7 @@ jobs:
   godot-composite:
     if: ${{ inputs.godot }}
     needs: godot
-    runs-on: [self-hosted, linux, x64, sat-builder]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -1515,7 +1515,7 @@ jobs:
     name: Publish continuous release
     needs: [pd, max, vst3, clap, vintage, touchdesigner, python, godot, standalone, gstreamer, wasm, pd-composite, max-composite, godot-composite]
     if: always() && github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    runs-on: [self-hosted, linux, x64, sat-builder]
+    runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:

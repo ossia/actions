@@ -6,7 +6,7 @@ on:
 jobs:
   release:
     name: Release
-    runs-on: [self-hosted, linux, x64, sat-builder]
+    runs-on: ubuntu-latest
     steps:
       - name: Support longpaths
         run: git config --global core.longpaths true
