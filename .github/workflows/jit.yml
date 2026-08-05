@@ -12,7 +12,7 @@ on:
 jobs:
   setup:
     name: Setup matrix
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, sat-builder]
     outputs:
       matrix: ${{ steps.filter.outputs.matrix }}
     steps:
@@ -24,7 +24,7 @@ jobs:
         run: |
           configs='[
             {"name":"Windows","triple":"windows/x86_64","os":"windows-latest"},
-            {"name":"Ubuntu","triple":"linux/x86_64","os":"ubuntu-latest"},
+            {"name":"Ubuntu","triple":"linux/x86_64","os":["self-hosted","linux","x64","sat-builder"]},
             {"name":"macOS","triple":"macos/arm64","os":"macos-15"}
           ]'
           if [ -z "${TARGETS// }" ]; then
