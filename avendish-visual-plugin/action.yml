@@ -53,15 +53,17 @@ runs:
       if: runner.os == 'Linux'
       shell: bash
       run: |
-        sudo apt-get update
-        sudo apt-get install -y --no-install-recommends \
+        # the job user is root in a container and has no sudo there
+        SUDO=""; if [ "$(id -u)" -ne 0 ]; then SUDO=sudo; fi
+        $SUDO apt-get update
+        $SUDO apt-get install -y --no-install-recommends \
           lsb-release wget software-properties-common gnupg ccache ninja-build uuid-runtime \
           libgl1-mesa-dev libgles2-mesa-dev libegl1-mesa-dev \
           libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
         curl -fsSL https://apt.llvm.org/llvm.sh -o llvm.sh
         chmod +x llvm.sh
-        sudo ./llvm.sh ${{ inputs.llvm-version }}
-        sudo apt-get install -y --no-install-recommends \
+        $SUDO ./llvm.sh ${{ inputs.llvm-version }}
+        $SUDO apt-get install -y --no-install-recommends \
           clang-${{ inputs.llvm-version }} lld-${{ inputs.llvm-version }} \
           libc++-${{ inputs.llvm-version }}-dev libc++abi-${{ inputs.llvm-version }}-dev
 

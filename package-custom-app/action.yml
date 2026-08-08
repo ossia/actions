@@ -158,8 +158,15 @@ runs:
       if: runner.os == 'Linux'
       shell: bash
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
+        # prebuilt CI images already carry these, and the job user has no sudo
+        missing=0
+        for t in 7z curl wget file desktop-file-install zsync; do
+          command -v "$t" >/dev/null || missing=1
+        done
+        if [ "$missing" = 0 ]; then echo "packaging tools already present"; exit 0; fi
+        SUDO=""; if [ "$(id -u)" -ne 0 ]; then SUDO=sudo; fi
+        $SUDO apt-get update
+        $SUDO apt-get install -y \
           p7zip-full \
           curl \
           wget \
