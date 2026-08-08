@@ -148,7 +148,8 @@ jobs:
   linux_gcc:
     name: "linux gcc (${{ matrix.compiler }})"
     if: ${{ inputs.linux_gcc }}
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, sat-builder]
+    container: ubuntu:noble
     strategy:
       fail-fast: false
       matrix:
@@ -187,7 +188,8 @@ jobs:
   linux_clang:
     name: "linux clang (${{ matrix.stdlib }})"
     if: ${{ inputs.linux_clang }}
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, linux, x64, sat-builder]
+    container: ubuntu:noble
     strategy:
       fail-fast: false
       matrix:
@@ -389,7 +391,8 @@ jobs:
   wasm:
     name: "wasm (emscripten)"
     if: ${{ inputs.wasm }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, sat-builder]
+    container: ubuntu:noble
     steps:
       - uses: actions/checkout@v4
         with:
@@ -426,7 +429,8 @@ jobs:
   android:
     name: "android (arm64-v8a)"
     if: ${{ inputs.android }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, sat-builder]
+    container: ubuntu:noble
     steps:
       - uses: actions/checkout@v4
         with:
