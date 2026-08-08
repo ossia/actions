@@ -289,7 +289,7 @@ jobs:
         if: runner.os == 'macOS'
         with:
           xcode-version: '>=16.4'
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           path: addon
@@ -311,7 +311,7 @@ jobs:
         run: choco install -y puredata jq zip ninja
       - name: Checkout PureData headers
         if: runner.os != 'Windows'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: pure-data/pure-data
           path: puredata
@@ -387,7 +387,7 @@ jobs:
           macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
           windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
           windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pd-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
           path: ${{ steps.cmakepkg.outputs.zip-path || steps.package.outputs.zip-path }}
@@ -401,7 +401,7 @@ jobs:
     needs: pd
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: pd-*
           merge-multiple: false
@@ -446,7 +446,7 @@ jobs:
       # TODO: optionally produce a .dek package via the Deken CLI
       #   (`pip install hexbinder/deken` or fetch upstream tarball).
       #   The plain zip is enough for v1.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pd-composite
           path: '*-pd-composite.zip'
@@ -470,7 +470,7 @@ jobs:
         if: runner.os == 'macOS'
         with:
           xcode-version: '>=16.4'
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           path: addon
@@ -483,7 +483,7 @@ jobs:
         shell: bash
         run: choco install -y jq zip ninja
       - name: Checkout Max SDK
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: jcelerier/max-sdk-base
           submodules: recursive
@@ -545,7 +545,7 @@ jobs:
           macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
           windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
           windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: max-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
           path: ${{ steps.cmakepkg.outputs.zip-path || steps.package.outputs.zip-path }}
@@ -560,7 +560,7 @@ jobs:
     needs: max
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: max-*
           merge-multiple: false
@@ -635,7 +635,7 @@ jobs:
           # -y preserves symlinks (matters for .mxo bundles on macOS)
           (cd staging && zip -ry "../${ADDON}-max-composite.zip" "$ADDON")
           ls -lah "${ADDON}-max-composite.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: max-composite
           path: '*-max-composite.zip'
@@ -659,7 +659,7 @@ jobs:
         if: runner.os == 'macOS'
         with:
           xcode-version: '>=16.4'
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           path: addon
@@ -680,7 +680,7 @@ jobs:
         shell: bash
         run: choco install -y jq zip ninja
       - name: Checkout VST3 SDK
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: steinbergmedia/vst3sdk
           submodules: recursive
@@ -734,7 +734,7 @@ jobs:
           macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
           windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
           windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: vst3-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
           path: ${{ steps.package.outputs.zip-path }}
@@ -758,7 +758,7 @@ jobs:
         if: runner.os == 'macOS'
         with:
           xcode-version: '>=16.4'
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           path: addon
@@ -779,7 +779,7 @@ jobs:
         shell: bash
         run: choco install -y jq zip ninja
       - name: Checkout CLAP SDK
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: free-audio/clap
           path: clap-sdk
@@ -819,7 +819,7 @@ jobs:
           macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
           windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
           windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: clap-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
           path: ${{ steps.package.outputs.zip-path }}
@@ -843,7 +843,7 @@ jobs:
         if: runner.os == 'macOS'
         with:
           xcode-version: '>=16.4'
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           path: addon
@@ -890,7 +890,7 @@ jobs:
           macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
           windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
           windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: vintage-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
           path: ${{ steps.package.outputs.zip-path }}
@@ -914,7 +914,7 @@ jobs:
         if: runner.os == 'macOS'
         with:
           xcode-version: '>=16.4'
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           path: addon
@@ -927,7 +927,7 @@ jobs:
         shell: bash
         run: choco install -y jq zip ninja
       - name: Checkout TouchDesigner SDK headers
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: jcelerier/CustomOperatorSamples
           ref: add-pop-headers
@@ -989,7 +989,7 @@ jobs:
           macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
           windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
           windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: touchdesigner-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
           path: ${{ steps.cmakepkg.outputs.zip-path || steps.package.outputs.zip-path }}
@@ -1013,11 +1013,11 @@ jobs:
         if: runner.os == 'macOS'
         with:
           xcode-version: '>=16.4'
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           path: addon
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Install dependencies (Linux)
@@ -1097,7 +1097,7 @@ jobs:
           macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
           windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
           windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: python-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
           path: ${{ steps.cmakepkg.outputs.zip-path || steps.package.outputs.zip-path }}
@@ -1121,7 +1121,7 @@ jobs:
         if: runner.os == 'macOS'
         with:
           xcode-version: '>=16.4'
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           path: addon
@@ -1197,7 +1197,7 @@ jobs:
           macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
           windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
           windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: godot-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
           path: ${{ steps.cmakepkg.outputs.zip-path || steps.package.outputs.zip-path }}
@@ -1213,7 +1213,7 @@ jobs:
     needs: godot
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: godot-*
           merge-multiple: false
@@ -1280,7 +1280,7 @@ jobs:
 
           (cd staging && zip -r "../${ADDON}-godot-composite.zip" "addons")
           ls -lah "${ADDON}-godot-composite.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: godot-composite
           path: '*-godot-composite.zip'
@@ -1304,7 +1304,7 @@ jobs:
         if: runner.os == 'macOS'
         with:
           xcode-version: '>=16.4'
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           path: addon
@@ -1359,7 +1359,7 @@ jobs:
           macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
           windows-certificate-base64: ${{ secrets.WIN_CERT_B64 }}
           windows-certificate-password: ${{ secrets.WIN_CERT_PASSWORD }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: standalone-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
           path: ${{ steps.package.outputs.zip-path }}
@@ -1379,7 +1379,7 @@ jobs:
         if: runner.os == 'macOS'
         with:
           xcode-version: '>=16.4'
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           path: addon
@@ -1444,7 +1444,7 @@ jobs:
           macos-notarize-team-id: ${{ secrets.APPLE_TEAM_ID }}
           macos-notarize-apple-id: ${{ secrets.APPLE_ID }}
           macos-notarize-password: ${{ secrets.APPLE_ALTOOL_PASSWORD }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gstreamer-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
           path: ${{ steps.package.outputs.zip-path }}
@@ -1460,7 +1460,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.setup.outputs.matrix_wasm) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           path: addon
@@ -1505,7 +1505,7 @@ jobs:
           output-dir: package
           os-tag: ${{ matrix.os-tag }}
           arch-tag: ${{ matrix.arch-tag }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wasm-${{ matrix.os-tag }}-${{ matrix.arch-tag }}
           path: ${{ steps.package.outputs.zip-path }}
@@ -1520,10 +1520,10 @@ jobs:
       contents: write
     steps:
       - name: Checkout (for tag setup)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download all backend artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: incoming
 
@@ -1532,7 +1532,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          # actions/download-artifact@v4 creates one dir per artifact; each dir
+          # actions/download-artifact@v8 creates one dir per artifact; each dir
           # contains exactly one *.zip. Flatten them all into dist/.
           find incoming -type f -name '*.zip' -exec cp -v {} dist/ \;
           echo "Final release payload:"
