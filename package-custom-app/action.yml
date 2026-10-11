@@ -364,6 +364,11 @@ runs:
         echo "Command: $CMD"
 
         eval "$CMD"
+      env:
+        # create-app-linux.sh runs appimagetool to write the app's AppImage, and
+        # appimagetool is itself an AppImage; extract-and-run avoids FUSE, which
+        # is unavailable under rootless docker on the self-hosted host.
+        APPIMAGE_EXTRACT_AND_RUN: 1
 
     - name: Set output path
       id: set-output
