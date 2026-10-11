@@ -136,6 +136,11 @@ runs:
         TARGET_PLATFORM: ${{ inputs.target-platform }}
         SCORE_EXTRA_CMAKE_ARGS: ${{ inputs.cmake-options }}
         SCORE_CMAKE_CACHE: ${{ inputs.cmake-cache }}
+        # appimage.build.sh runs appimagetool, which is itself an AppImage;
+        # extract-and-run avoids FUSE, unavailable under rootless docker on the
+        # self-hosted host. score's own appimage.yml sets this on the job, so a
+        # caller going through this action has to set it too.
+        APPIMAGE_EXTRACT_AND_RUN: 1
 
     - name: Deploy
       id: deploy
