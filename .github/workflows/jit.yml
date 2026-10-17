@@ -8,6 +8,11 @@ on:
         required: false
         default: ''
         type: string
+      score-version:
+        description: 'Released score version to build against, next to continuous.'
+        required: false
+        default: '3.9.0'
+        type: string
 
 jobs:
   setup:
@@ -42,7 +47,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: [ "latest", "continuous" ]
+        version: ${{ fromJSON(format('["{0}","continuous"]', inputs.score-version)) }}
         config: ${{ fromJSON(needs.setup.outputs.matrix) }}
 
     steps:
