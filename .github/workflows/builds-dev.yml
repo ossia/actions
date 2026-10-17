@@ -104,7 +104,7 @@ jobs:
         with:
           name: plugin-${{ matrix.config.os }}
           path: |
-            build-Release/install/plugins
+            install/*
 
   package:
     name: Package
