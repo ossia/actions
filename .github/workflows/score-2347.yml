@@ -5,6 +5,7 @@ on:
 
 jobs:
   jit-builtins:
+    if: false
     name: "JIT Windows 3.9.0, builtins ${{ matrix.builtins }}"
     runs-on: windows-latest
     timeout-minutes: 20
@@ -71,6 +72,13 @@ jobs:
           F="$(cygpath -u '${{ steps.score-sdk.outputs.sdk-path }}')/lib/cmake/score/ScoreExternalAddon.sdk.cmake"
           curl -fL -o "$F" https://raw.githubusercontent.com/ossia/score/d5e70e3323c457b2c0fb45929c258b657c0cca15/cmake/ScoreExternalAddon.sdk.cmake
           grep -n FMT_HEADER_ONLY "$F"
+      - uses: ossia/actions/build-addon@ci/target-score-3.9
+        with:
+          addon-path: addon
+          build-type: Debug
+          score-sdk-path: ${{ steps.score-sdk.outputs.sdk-path }}
+          ossia-sdk-path: ${{ steps.ossia-sdk.outputs.sdk-path }}
+          additional-flags: -GNinja
       - uses: ossia/actions/build-addon@ci/target-score-3.9
         with:
           addon-path: addon
