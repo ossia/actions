@@ -468,6 +468,7 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-30 \
+            -DCMAKE_CXX_SCAN_FOR_MODULES=OFF \
             -DBOOST_ROOT="$PWD/boost" ${AVND_OFF} \
             -DBoost_INCLUDE_DIR="$PWD/boost/include" \
             -DBoost_NO_BOOST_CMAKE=ON \
