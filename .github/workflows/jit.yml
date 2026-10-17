@@ -66,19 +66,6 @@ jobs:
           version: "${{ matrix.version }}"
           extract-path: "./sdk"
 
-      # Runtime libs the score AppImage expects from the system.
-      - name: Install runtime dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libv4l-0 libfontconfig1 libglib2.0-0t64 \
-            libegl1 libopengl0 libglx0 libgbm1 \
-            libwayland-client0 libwayland-cursor0 libwayland-egl1 \
-            libx11-xcb1 libxkbcommon-x11-0 \
-            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
-            libxcb-render-util0 libxcb-shape0 libxcb-sync1 libxcb-xfixes0 libxcb-xinput0 libxcb-xkb1
-
       - name: JIT compile test
         uses: ossia/actions/jit-compile@master
         with:
