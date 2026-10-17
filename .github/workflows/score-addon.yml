@@ -22,7 +22,7 @@ name: Score addon CI
 #
 #   jobs:
 #     ci:
-#       uses: ossia/actions/.github/workflows/score-addon.yml@master
+#       uses: ossia/actions/.github/workflows/score-addon.yml@ci/target-score-3.9
 #       secrets: inherit
 #       # with:
 #       #   jit: false      # opt out of one track
@@ -69,25 +69,25 @@ on:
 jobs:
   dev:
     if: inputs.dev
-    uses: ossia/actions/.github/workflows/builds-dev.yml@master
+    uses: ossia/actions/.github/workflows/builds-dev.yml@ci/target-score-3.9
     secrets: inherit
     with:
       targets: ${{ inputs.targets }}
   sdk:
     if: inputs.sdk
-    uses: ossia/actions/.github/workflows/builds-sdk.yml@master
+    uses: ossia/actions/.github/workflows/builds-sdk.yml@ci/target-score-3.9
     secrets: inherit
     with:
       targets: ${{ inputs.targets }}
       score-version: ${{ inputs.score-version }}
   jit:
     if: inputs.jit
-    uses: ossia/actions/.github/workflows/jit.yml@master
+    uses: ossia/actions/.github/workflows/jit.yml@ci/target-score-3.9
     secrets: inherit
     with:
       targets: ${{ inputs.targets }}
       score-version: ${{ inputs.score-version }}
   release:
     if: inputs.release
-    uses: ossia/actions/.github/workflows/release.yml@master
+    uses: ossia/actions/.github/workflows/release.yml@ci/target-score-3.9
     secrets: inherit

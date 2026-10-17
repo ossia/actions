@@ -61,13 +61,13 @@ jobs:
           path: addon
 
       - name: Download Score SDK
-        uses: ossia/actions/download-score-sdk@master
+        uses: ossia/actions/download-score-sdk@ci/target-score-3.9
         with:
           version: "${{ matrix.version }}"
           extract-path: "./sdk"
 
       - name: JIT compile test
-        uses: ossia/actions/jit-compile@master
+        uses: ossia/actions/jit-compile@ci/target-score-3.9
         with:
           score-version: ${{ matrix.version }}
           sdk-path: "./sdk/usr"

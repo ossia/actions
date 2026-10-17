@@ -70,20 +70,20 @@ jobs:
           ${{ matrix.config.dependencies }}
 
       - name: Download OSSIA SDK
-        uses: ossia/actions/download-ossia-sdk@master
+        uses: ossia/actions/download-ossia-sdk@ci/target-score-3.9
         id: ossia-sdk
         with:
           score-version: "${{ matrix.version }}"
 
       - name: Download Score SDK
-        uses: ossia/actions/download-score-sdk@master
+        uses: ossia/actions/download-score-sdk@ci/target-score-3.9
         id: score-sdk
         with:
           version: "${{ matrix.version }}"
           extract-path: "./sdk"
 
       - name: Build debug
-        uses: ossia/actions/build-addon@master
+        uses: ossia/actions/build-addon@ci/target-score-3.9
         with:
           addon-path: addon
           build-type: Debug
@@ -92,7 +92,7 @@ jobs:
           additional-flags: ${{ matrix.config.additional_flags }}
 
       - name: Build release
-        uses: ossia/actions/build-addon@master
+        uses: ossia/actions/build-addon@ci/target-score-3.9
         with:
           addon-path: addon
           build-type: Release
@@ -118,7 +118,7 @@ jobs:
           submodules: "recursive"
 
       - name: Package addon
-        uses: ossia/actions/package-addon@master
+        uses: ossia/actions/package-addon@ci/target-score-3.9
 
       - name: Upload package
         uses: actions/upload-artifact@v7
