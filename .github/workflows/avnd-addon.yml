@@ -419,7 +419,7 @@ jobs:
           mkdir -p "staging/$ADDON"
 
           shopt -s nullglob
-          ZIPS=( per-os/*/${ADDON}-pd-*.zip )
+          ZIPS=( per-os/${ADDON}-pd-*.zip per-os/*/${ADDON}-pd-*.zip )
           if [[ ${#ZIPS[@]} -eq 0 ]]; then
             echo "Error: no per-OS pd artifacts found under per-os/"
             ls -lR per-os || true
@@ -578,7 +578,7 @@ jobs:
           mkdir -p "staging/$ADDON"/{externals,help,extras}
 
           shopt -s nullglob
-          ZIPS=( per-os/*/${ADDON}-max-*.zip )
+          ZIPS=( per-os/${ADDON}-max-*.zip per-os/*/${ADDON}-max-*.zip )
           if [[ ${#ZIPS[@]} -eq 0 ]]; then
             echo "Error: no per-OS max artifacts found under per-os/"
             ls -lR per-os || true
@@ -1231,7 +1231,7 @@ jobs:
           mkdir -p "staging/addons/$ADDON/bin"
 
           shopt -s nullglob
-          ZIPS=( per-os/*/${ADDON}-godot-*.zip )
+          ZIPS=( per-os/${ADDON}-godot-*.zip per-os/*/${ADDON}-godot-*.zip )
           if [[ ${#ZIPS[@]} -eq 0 ]]; then
             echo "Error: no per-OS godot artifacts found under per-os/"
             ls -lR per-os || true
