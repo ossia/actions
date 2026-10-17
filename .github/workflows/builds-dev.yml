@@ -8,6 +8,11 @@ on:
         required: false
         default: ''
         type: string
+      submodules:
+        description: 'Submodule checkout of the add-on for the build jobs (actions/checkout submodules value).'
+        required: false
+        default: 'recursive'
+        type: string
 
 jobs:
   setup:
@@ -54,7 +59,7 @@ jobs:
       - name: Checkout addon
         uses: actions/checkout@v7
         with:
-          submodules: "recursive"
+          submodules: ${{ inputs.submodules }}
           path: addon
 
       - name: Checkout score
