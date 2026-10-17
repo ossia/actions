@@ -1,0 +1,80 @@
+name: score-2347 check
+on:
+  push:
+    branches: [test/score-2347]
+
+jobs:
+  jit-builtins:
+    name: "JIT Windows 3.9.0, builtins ${{ matrix.builtins }}"
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        builtins: [default, x86_64]
+    steps:
+      - run: git config --global core.longpaths true
+      - uses: actions/checkout@v7
+        with:
+          repository: ossia-templates/score-device-template
+          ref: ci/migrate-to-reusable-workflows
+          submodules: recursive
+          path: addon
+      - uses: ossia/actions/download-score-sdk@ci/target-score-3.9
+        with:
+          version: "3.9.0"
+          extract-path: "./sdk"
+      - if: matrix.builtins == 'x86_64'
+        shell: bash
+        run: |
+          ls sdk/usr/lib/clang/*/lib/windows/
+          echo "SCORE_JIT_BUILTINS=$(cygpath -m "$(ls -d $PWD/sdk/usr/lib/clang/*/lib/windows)/libclang_rt.builtins-x86_64.a")" >> $GITHUB_ENV
+      - uses: ossia/actions/jit-compile@ci/target-score-3.9
+        with:
+          score-version: "3.9.0"
+          sdk-path: "./sdk/usr"
+          addon-path: "./addon"
+
+  sdk-fmt:
+    name: "SDK Windows 3.9.0 ${{ matrix.addon.repo }} (${{ matrix.cmake }} cmake)"
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cmake: [released, patched]
+        addon:
+          - { repo: ossia/score-addon-ultraleap, ref: ci/migrate-to-reusable-workflows }
+          - { repo: ossia/score-addon-lsl, ref: ci/drop-stale-latest-note }
+          - { repo: ossia/score-addon-ndi, ref: ci/migrate-to-reusable-workflows }
+    steps:
+      - run: git config --global core.longpaths true
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ matrix.addon.repo }}
+          ref: ${{ matrix.addon.ref }}
+          submodules: recursive
+          path: addon
+      - shell: bash
+        run: curl -L -O https://github.com/ninja-build/ninja/releases/download/v1.13.1/ninja-win.zip && unzip ninja-win.zip
+      - uses: ossia/actions/download-ossia-sdk@ci/target-score-3.9
+        id: ossia-sdk
+        with:
+          score-version: "3.9.0"
+      - uses: ossia/actions/download-score-sdk@ci/target-score-3.9
+        id: score-sdk
+        with:
+          version: "3.9.0"
+          extract-path: "./sdk"
+      - if: matrix.cmake == 'patched'
+        shell: bash
+        run: |
+          F="$(cygpath -u '${{ steps.score-sdk.outputs.sdk-path }}')/lib/cmake/score/ScoreExternalAddon.sdk.cmake"
+          curl -fL -o "$F" https://raw.githubusercontent.com/ossia/score/d5e70e3323c457b2c0fb45929c258b657c0cca15/cmake/ScoreExternalAddon.sdk.cmake
+          grep -n FMT_HEADER_ONLY "$F"
+      - uses: ossia/actions/build-addon@ci/target-score-3.9
+        with:
+          addon-path: addon
+          build-type: Release
+          score-sdk-path: ${{ steps.score-sdk.outputs.sdk-path }}
+          ossia-sdk-path: ${{ steps.ossia-sdk.outputs.sdk-path }}
+          additional-flags: -GNinja
