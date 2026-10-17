@@ -8,6 +8,11 @@ on:
         required: false
         default: ''
         type: string
+      submodules:
+        description: 'Submodule checkout of the add-on for the build jobs (actions/checkout submodules value).'
+        required: false
+        default: 'recursive'
+        type: string
       score-version:
         description: 'Released score version to build against, next to continuous.'
         required: false
@@ -57,7 +62,7 @@ jobs:
       - name: Checkout addon
         uses: actions/checkout@v7
         with:
-          submodules: "recursive"
+          submodules: ${{ inputs.submodules }}
           path: addon
 
       - name: Download Score SDK
