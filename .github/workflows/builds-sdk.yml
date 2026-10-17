@@ -8,6 +8,16 @@ on:
         required: false
         default: ''
         type: string
+      submodules:
+        description: 'Submodule checkout of the add-on for the build jobs (actions/checkout submodules value).'
+        required: false
+        default: 'recursive'
+        type: string
+      score-version:
+        description: 'Released score version to build against, next to continuous.'
+        required: false
+        default: '3.9.0'
+        type: string
 
 jobs:
   setup:
@@ -24,7 +34,7 @@ jobs:
         run: |
           configs='[
             {"name":"Windows","triple":"windows/x86_64","os":"windows-latest","dependencies":"curl -L -O https://github.com/ninja-build/ninja/releases/download/v1.13.1/ninja-win.zip && unzip ninja-win.zip","additional_flags":"-GNinja"},
-            {"name":"Ubuntu","triple":"linux/x86_64","os":"ubuntu-latest","dependencies":"sudo apt -y update; sudo apt install -yqq libgl-dev libgl1-mesa-dev libegl1-mesa-dev libdrm-dev libgbm-dev libxcomposite-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libxcb-*-dev libX11-*-dev libz-dev libtinfo6 libxext-dev","additional_flags":""},
+            {"name":"Ubuntu","triple":"linux/x86_64","os":"ubuntu-latest","dependencies":"sudo apt -y update; sudo apt install -yqq libgl-dev libgl1-mesa-dev libegl1-mesa-dev libdrm-dev libgbm-dev libdbus-1-dev libxcomposite-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libxcb-*-dev libX11-*-dev libz-dev libtinfo6 libxext-dev","additional_flags":""},
             {"name":"macOS","triple":"macos/arm64","os":"macos-15","dependencies":"","additional_flags":""}
           ]'
           if [ -z "${TARGETS// }" ]; then
@@ -41,7 +51,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: [ "latest", "continuous" ]
+        version: ${{ fromJSON(format('["{0}","continuous"]', inputs.score-version)) }}
         config: ${{ fromJSON(needs.setup.outputs.matrix) }}
     steps:
       - name: Support longpaths
@@ -55,7 +65,7 @@ jobs:
       - name: Checkout addon
         uses: actions/checkout@v7
         with:
-          submodules: "recursive"
+          submodules: ${{ inputs.submodules }}
           path: addon
 
       - name: Install dependencies
@@ -65,18 +75,20 @@ jobs:
           ${{ matrix.config.dependencies }}
 
       - name: Download OSSIA SDK
-        uses: ossia/actions/download-ossia-sdk@master
+        uses: ossia/actions/download-ossia-sdk@ci/target-score-3.9
         id: ossia-sdk
+        with:
+          score-version: "${{ matrix.version }}"
 
       - name: Download Score SDK
-        uses: ossia/actions/download-score-sdk@master
+        uses: ossia/actions/download-score-sdk@ci/target-score-3.9
         id: score-sdk
         with:
           version: "${{ matrix.version }}"
           extract-path: "./sdk"
 
       - name: Build debug
-        uses: ossia/actions/build-addon@master
+        uses: ossia/actions/build-addon@ci/target-score-3.9
         with:
           addon-path: addon
           build-type: Debug
@@ -85,7 +97,7 @@ jobs:
           additional-flags: ${{ matrix.config.additional_flags }}
 
       - name: Build release
-        uses: ossia/actions/build-addon@master
+        uses: ossia/actions/build-addon@ci/target-score-3.9
         with:
           addon-path: addon
           build-type: Release
@@ -111,7 +123,7 @@ jobs:
           submodules: "recursive"
 
       - name: Package addon
-        uses: ossia/actions/package-addon@master
+        uses: ossia/actions/package-addon@ci/target-score-3.9
 
       - name: Upload package
         uses: actions/upload-artifact@v7

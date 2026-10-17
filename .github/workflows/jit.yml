@@ -8,6 +8,16 @@ on:
         required: false
         default: ''
         type: string
+      submodules:
+        description: 'Submodule checkout of the add-on for the build jobs (actions/checkout submodules value).'
+        required: false
+        default: 'recursive'
+        type: string
+      score-version:
+        description: 'Released score version to build against, next to continuous.'
+        required: false
+        default: '3.9.0'
+        type: string
 
 jobs:
   setup:
@@ -42,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version: [ "latest", "continuous" ]
+        version: ${{ fromJSON(format('["{0}","continuous"]', inputs.score-version)) }}
         config: ${{ fromJSON(needs.setup.outputs.matrix) }}
 
     steps:
@@ -52,30 +62,17 @@ jobs:
       - name: Checkout addon
         uses: actions/checkout@v7
         with:
-          submodules: "recursive"
+          submodules: ${{ inputs.submodules }}
           path: addon
 
       - name: Download Score SDK
-        uses: ossia/actions/download-score-sdk@master
+        uses: ossia/actions/download-score-sdk@ci/target-score-3.9
         with:
           version: "${{ matrix.version }}"
           extract-path: "./sdk"
 
-      # Runtime libs the score AppImage expects from the system.
-      - name: Install runtime dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libv4l-0 libfontconfig1 libglib2.0-0t64 \
-            libegl1 libopengl0 libglx0 libgbm1 \
-            libwayland-client0 libwayland-cursor0 libwayland-egl1 \
-            libx11-xcb1 libxkbcommon-x11-0 \
-            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
-            libxcb-render-util0 libxcb-shape0 libxcb-sync1 libxcb-xfixes0 libxcb-xinput0 libxcb-xkb1
-
       - name: JIT compile test
-        uses: ossia/actions/jit-compile@master
+        uses: ossia/actions/jit-compile@ci/target-score-3.9
         with:
           score-version: ${{ matrix.version }}
           sdk-path: "./sdk/usr"
