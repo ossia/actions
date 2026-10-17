@@ -2,7 +2,7 @@ name: 'Download Score SDK'
 description: 'Downloads the score SDK headers for building addons'
 inputs:
   version:
-    description: 'Score version (use "continuous" for latest)'
+    description: 'Score version, e.g. "3.9.0", or "continuous" for the master build'
     required: false
     default: 'continuous'
   extract-path:
@@ -53,9 +53,11 @@ runs:
       id: extract
       shell: bash
       run: |
-        mkdir -p ${{ inputs.extract-path }}
-        unzip -qq ${{ steps.sdk-filename.outputs.filename }}
+        EXTRACT_IN="${{ inputs.extract-path }}"
+        EXTRACT="${EXTRACT_IN//\\//}"
+        mkdir -p "$EXTRACT"
+        unzip -qq "${{ steps.sdk-filename.outputs.filename }}"
 
-        mv usr ${{ inputs.extract-path }}/
+        mv usr "$EXTRACT/"
 
-        echo "sdk-path=${{ inputs.extract-path }}/usr" >> $GITHUB_OUTPUT
+        echo "sdk-path=$EXTRACT/usr" >> $GITHUB_OUTPUT
