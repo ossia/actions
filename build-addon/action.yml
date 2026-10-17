@@ -54,9 +54,6 @@ runs:
       shell: bash
       run: |
         export PATH=$PATH:$PWD
-        # Callers pass either a relative path (score) or an absolute one. On
-        # Windows an absolute path arrives with backslashes, which bash would
-        # eat, so normalize the separators before resolving.
         SCORE_IN="${{ inputs.score-path }}"
         SCORE_SRC="$(cd "${SCORE_IN//\\//}" && pwd)"
         cmake -S ${{ inputs.addon-path }} -B ${{ env.BUILD_DIR }} \
@@ -74,10 +71,6 @@ runs:
       shell: bash
       run: |
         export PATH=$PATH:$PWD
-        # Callers pass either a relative path (./sdk/usr) or an absolute one
-        # under the runner temp dir. On Windows an absolute path arrives with
-        # backslashes, which bash would eat, so normalize the separators
-        # before resolving.
         SDK_IN="${{ inputs.score-sdk-path }}"
         SCORE_SDK="$(cd "${SDK_IN//\\//}" && pwd)"
         cmake -S ${{ inputs.addon-path }} -B ${{ env.BUILD_DIR }} \
