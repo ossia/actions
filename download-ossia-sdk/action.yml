@@ -5,6 +5,10 @@ inputs:
     description: 'Path to the score repository (for fetch-sdk.sh)'
     required: false
     default: ''
+  score-version:
+    description: 'Score release whose fetch-sdk.sh to use when no score-path is given ("continuous" = master)'
+    required: false
+    default: 'continuous'
 outputs:
   sdk-path:
     description: 'Path to the installed SDK'
@@ -17,14 +21,18 @@ runs:
       if: inputs.score-path != ''
       shell: bash
       run: |
-        cd ${{ inputs.score-path }}
+        cd "${{ inputs.score-path }}"
         tools/fetch-sdk.sh
 
     - name: Download SDK (standalone)
       if: inputs.score-path == ''
       shell: bash
       run: |
-        curl -L -O "https://github.com/ossia/score/raw/master/tools/fetch-sdk.sh"
+        case "${{ inputs.score-version }}" in
+          continuous|master|latest) REF=master ;;
+          *) REF="v${{ inputs.score-version }}" ;;
+        esac
+        curl -fL -o fetch-sdk.sh "https://raw.githubusercontent.com/ossia/score/$REF/tools/fetch-sdk.sh"
         chmod +x fetch-sdk.sh
         ./fetch-sdk.sh
 
