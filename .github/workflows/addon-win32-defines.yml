@@ -1,0 +1,119 @@
+name: addon-win32-defines check
+on:
+  push:
+    branches: [test/addon-win32-defines]
+
+env:
+  SCORE_SHA: 1f2fb22d98d0c8793db4ae7fa71f2c387b9bed00
+
+jobs:
+  sdk:
+    name: "SDK Windows continuous ${{ matrix.addon.repo }} (${{ matrix.cmake }} cmake)"
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cmake: [patched]
+        addon:
+          - { repo: ossia/iscore-addon-network, ref: ci/migrate-to-reusable-workflows }
+          - { repo: ossia/score-addon-ble, ref: ci/migrate-to-reusable-workflows }
+          - { repo: ossia/score-addon-cv, ref: cmake/avendish-3.9 }
+          - { repo: ossia/score-addon-deuterium, ref: ci/migrate-to-reusable-workflows }
+          - { repo: ossia/score-addon-lavfi, ref: ci/score-addon-workflow }
+          - { repo: ossia/score-addon-led, ref: ci/self-hosted-linux-jobs }
+          - { repo: ossia/score-addon-librediffusion, ref: cmake/avendish-3.9 }
+          - { repo: ossia/score-addon-lsl, ref: ci/drop-stale-latest-note }
+          - { repo: ossia/score-addon-ndi, ref: ci/migrate-to-reusable-workflows }
+          - { repo: ossia/score-addon-orbbec, ref: ci/self-hosted-linux-jobs }
+          - { repo: ossia/score-addon-puara, ref: cmake/avendish-3.9 }
+          - { repo: ossia/score-addon-ultraleap, ref: ci/migrate-to-reusable-workflows }
+          - { repo: ossia/score-addon-ltc, ref: migrate-avnd-addon }
+          - { repo: ossia/score-addon-synthimi, ref: migrate-avnd-addon }
+          - { repo: ossia/score-addon-spatgris, ref: ci/migrate-to-reusable-workflows }
+          - { repo: ossia-templates/score-avnd-simple-template, ref: ci/score-addon-workflow }
+          - { repo: ossia-templates/score-avnd-template, ref: ci/migrate-to-reusable-workflows }
+          - { repo: ossia-templates/score-device-template, ref: ci/migrate-to-reusable-workflows }
+          - { repo: ossia-templates/score-offline-process-template, ref: ci/migrate-to-reusable-workflows }
+          - { repo: ossia-templates/score-process-template, ref: ci/migrate-to-reusable-workflows }
+          - { repo: ossia-templates/score-vfx-template, ref: ci/migrate-to-reusable-workflows }
+        include:
+          - cmake: released
+            addon: { repo: ossia/score-addon-spatgris, ref: ci/migrate-to-reusable-workflows }
+    steps:
+      - run: git config --global core.longpaths true
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ matrix.addon.repo }}
+          ref: ${{ matrix.addon.ref }}
+          submodules: recursive
+          path: addon
+      - shell: bash
+        run: curl -L -O https://github.com/ninja-build/ninja/releases/download/v1.13.1/ninja-win.zip && unzip ninja-win.zip
+      - uses: ossia/actions/download-ossia-sdk@master
+        id: ossia-sdk
+        with:
+          score-version: continuous
+      - uses: ossia/actions/download-score-sdk@master
+        id: score-sdk
+        with:
+          version: continuous
+          extract-path: "./sdk"
+      - if: matrix.cmake == 'patched'
+        shell: bash
+        run: |
+          F="$(cygpath -u '${{ steps.score-sdk.outputs.sdk-path }}')/lib/cmake/score/ScoreExternalAddon.sdk.cmake"
+          curl -fL -o "$F" "https://raw.githubusercontent.com/ossia/score/$SCORE_SHA/cmake/ScoreExternalAddon.sdk.cmake"
+          grep -n WIN32_LEAN_AND_MEAN "$F"
+      - uses: ossia/actions/build-addon@master
+        with:
+          addon-path: addon
+          build-type: Debug
+          score-sdk-path: ${{ steps.score-sdk.outputs.sdk-path }}
+          ossia-sdk-path: ${{ steps.ossia-sdk.outputs.sdk-path }}
+          additional-flags: -GNinja
+      - uses: ossia/actions/build-addon@master
+        with:
+          addon-path: addon
+          build-type: Release
+          score-sdk-path: ${{ steps.score-sdk.outputs.sdk-path }}
+          ossia-sdk-path: ${{ steps.ossia-sdk.outputs.sdk-path }}
+          additional-flags: -GNinja
+
+  dev:
+    name: "Dev Windows ${{ matrix.addon.repo }} (score ${{ matrix.score }})"
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        score: [master, fix/addon-win32-defines]
+        addon:
+          - { repo: ossia/score-addon-spatgris, ref: ci/migrate-to-reusable-workflows }
+          - { repo: ossia/score-addon-lsl, ref: ci/drop-stale-latest-note }
+          - { repo: ossia/score-addon-ble, ref: ci/migrate-to-reusable-workflows }
+    steps:
+      - run: git config --global core.longpaths true
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ matrix.addon.repo }}
+          ref: ${{ matrix.addon.ref }}
+          submodules: recursive
+          path: addon
+      - uses: actions/checkout@v7
+        with:
+          repository: ossia/score
+          ref: ${{ matrix.score }}
+          submodules: recursive
+          path: score
+      - shell: bash
+        run: curl -L -O https://github.com/ninja-build/ninja/releases/download/v1.13.1/ninja-win.zip && unzip ninja-win.zip
+      - uses: ossia/actions/download-ossia-sdk@master
+        id: ossia-sdk
+        with:
+          score-path: score
+      - uses: ossia/actions/build-addon@master
+        with:
+          addon-path: addon
+          build-type: Debug
+          score-path: score
+          ossia-sdk-path: ${{ steps.ossia-sdk.outputs.sdk-path }}
+          additional-flags: -GNinja
