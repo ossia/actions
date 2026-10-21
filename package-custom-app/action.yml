@@ -24,6 +24,10 @@ inputs:
     description: 'Optional environment variables'
     required: false
     default: ''
+  app-info-plist:
+    description: 'Optional Info.plist with entries for the app, merged over ossia score''s (macOS), e.g. NSCameraUsageDescription'
+    required: false
+    default: ''
   app-copyright:
     description: 'One-line copyright of your app'
     required: true
@@ -351,6 +355,9 @@ runs:
 
         if [[ -n "${{ inputs.app-environment }}" ]]; then
           CMD="$CMD --app-environment $PWD/${{ inputs.app-environment }}"
+        fi
+        if [[ -n "${{ inputs.app-info-plist }}" ]]; then
+          CMD="$CMD --app-info-plist \"$PWD/${{ inputs.app-info-plist }}\""
         fi
 
         CMD="$CMD --app-version \"${{ inputs.app-version }}\""
